@@ -9,5 +9,6 @@ dependencies = [
     "pydantic>=2.10.0",
     "pydantic-settings>=2.7.0",
     "python-dotenv>=1.0.0",
-    "eth-account>=0.14.0",
+    "eth-account>=0.11.0",
+    "eth-utils>=4.0.0",
 ]
