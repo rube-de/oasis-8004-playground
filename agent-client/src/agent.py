@@ -7,7 +7,6 @@ plugin lifecycle, registration workflow, and runtime operations.
 import json
 import logging
 import signal
-import sys
 import time
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -85,10 +84,11 @@ class Agent:
             # Initialize ContractUtility
             logger.info("Initializing contract utility")
             self.contract_utility = ContractUtility(self.config)
-            logger.info(
-                f"Contract utility initialized for account: "
-                f"{self.contract_utility.account.address}"
-            )
+            if self.contract_utility.account:
+                logger.info(
+                    f"Contract utility initialized for account: "
+                    f"{self.contract_utility.account.address}"
+                )
 
             # Initialize Identity Registry plugin
             logger.info("Loading Identity Registry plugin")
@@ -123,7 +123,7 @@ class Agent:
         Raises:
             AgentError: If registration fails
         """
-        if not self.identity_plugin:
+        if not self.identity_plugin or not self.contract_utility or not self.config:
             raise AgentError("Agent not initialized. Call initialize() first.")
 
         # Check if we have persisted agent_id
@@ -148,16 +148,18 @@ class Agent:
 
         # Check if address is already registered
         try:
-            agent_address = self.contract_utility.account.address
-            existing = self.identity_plugin.resolve_by_address(agent_address)
+            if self.contract_utility.account:
+                agent_address = self.contract_utility.account.address
+                existing = self.identity_plugin.resolve_by_address(agent_address)
 
-            if existing:
-                logger.info(
-                    f"Agent already registered on-chain with ID: {existing['agentId']}"
-                )
-                self.agent_id = existing["agentId"]
-                self._save_state()
-                return self.agent_id
+                if existing:
+                    agent_id = existing["agentId"]
+                    logger.info(
+                        f"Agent already registered on-chain with ID: {agent_id}"
+                    )
+                    self.agent_id = agent_id
+                    self._save_state()
+                    return agent_id
         except Exception:
             # Not found, proceed with registration
             pass
@@ -172,7 +174,7 @@ class Agent:
                 f"✓ Registration successful! "
                 f"Agent ID: {self.agent_id}, "
                 f"Domain: {self.config.agent_domain}, "
-                f"Address: {self.contract_utility.account.address}"
+                f"Address: {self.contract_utility.account.address if self.contract_utility.account else 'unknown'}"
             )
 
             # Persist state
@@ -306,7 +308,7 @@ class Agent:
 
         return health
 
-    def _handle_shutdown_signal(self, signum: int, frame) -> None:
+    def _handle_shutdown_signal(self, signum: int, _frame: object) -> None:
         """Handle shutdown signals (SIGTERM, SIGINT)."""
         sig_name = signal.Signals(signum).name
         logger.info(f"Received {sig_name} signal")
@@ -314,10 +316,11 @@ class Agent:
 
     def _log_heartbeat(self) -> None:
         """Log periodic heartbeat with status."""
-        logger.info(
-            f"💓 Heartbeat: Agent {self.agent_id} running, "
-            f"domain={self.config.agent_domain}"
-        )
+        if self.config:
+            logger.info(
+                f"💓 Heartbeat: Agent {self.agent_id} running, "
+                f"domain={self.config.agent_domain}"
+            )
 
     def _load_state(self) -> None:
         """Load persisted agent state from disk.
@@ -349,14 +352,23 @@ class Agent:
         Raises:
             StateError: If state persistence fails
         """
+        if not self.config or not self.contract_utility:
+            raise StateError("Cannot save state: agent not fully initialized")
+
         try:
             # Ensure state directory exists
             self.STATE_DIR.mkdir(parents=True, exist_ok=True)
 
+            account_address = (
+                self.contract_utility.account.address
+                if self.contract_utility.account
+                else None
+            )
+
             state = {
                 "agent_id": self.agent_id,
                 "domain": self.config.agent_domain,
-                "address": self.contract_utility.account.address,
+                "address": account_address,
                 "timestamp": time.time()
             }
 
