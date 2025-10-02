@@ -103,22 +103,12 @@ class IdentityRegistryPlugin(BaseRegistryPlugin):
     def _send_registration_transaction(self, agent_domain: str, agent_address: str) -> HexBytes:
         """Build and send registration transaction. Returns tx hash."""
         try:
-            # Build transaction
-            tx_function = self.contract.functions.newAgent(agent_domain, agent_address)
-
-            # Estimate gas with safety multiplier
-            try:
-                estimated_gas = tx_function.estimate_gas(
-                    {"from": agent_address}
-                )
-                gas_limit = int(estimated_gas * self.config.gas_multiplier)
-                logger.debug(f"Gas estimate: {estimated_gas}, using: {gas_limit}")
-            except Exception as e:
-                logger.warning(f"Gas estimation failed: {e}. Using default gas limit.")
-                gas_limit = 500000  # Fallback gas limit
-
-            # Send transaction
-            tx_hash = tx_function.transact({"from": agent_address, "gas": gas_limit})
+            # Send transaction with explicit gas price
+            tx_hash = self.contract.functions.newAgent(agent_domain, agent_address).transact({
+                "from": agent_address,
+                "gas": 300000,
+                "gasPrice": self.contract_utility.w3.eth.gas_price,
+            })
             logger.debug(f"Transaction submitted: {tx_hash.hex()}")
 
             return tx_hash

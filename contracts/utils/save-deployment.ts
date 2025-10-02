@@ -1,105 +1,59 @@
 import { HardhatRuntimeEnvironment } from "hardhat/types";
-import { ethers } from "ethers";
-import fs from "fs/promises";
-import path from "path";
+import fs from "node:fs";
+import path from "node:path";
 
-interface DeploymentInfo {
+export interface DeploymentInfo {
   address: string;
-  transactionHash?: string;
+  network: string;
+  chainId: string;
+  deployer: string;
   blockNumber: number;
   timestamp: number;
-  deployer: string;
-  network: string;
-  chainId: bigint;
+  transactionHash?: string;
   constructorArgs?: any[];
 }
 
-interface DeploymentRegistry {
-  [network: string]: {
-    [contractName: string]: DeploymentInfo;
-  };
-}
-
-const DEPLOYMENTS_DIR = "deployments";
-const DEPLOYMENTS_FILE = "deployments.json";
-
 /**
- * Saves deployment information to a JSON file organized by network and contract name
+ * Saves deployment information to a JSON file named ContractName-networkName.json
  */
 export async function saveDeploymentInfo(
   contractName: string,
   contractAddress: string,
   hre: HardhatRuntimeEnvironment,
-  ethersProvider: any,
+  ethers: any,
   additionalInfo?: {
     transactionHash?: string;
     constructorArgs?: any[];
   }
 ): Promise<void> {
-  try {
-    const networkName = hre.globalOptions.network || "hardhat";
-    const [deployer] = await ethersProvider.getSigners();
-    const blockNumber = await ethersProvider.provider.getBlockNumber();
-    const block = await ethersProvider.provider.getBlock(blockNumber);
-    const network = await ethersProvider.provider.getNetwork();
+  const [deployer] = await ethers.getSigners();
+  const network = await ethers.provider.getNetwork();
+  const blockNumber = await ethers.provider.getBlockNumber();
+  const block = await ethers.provider.getBlock(blockNumber);
 
-    const deploymentInfo: DeploymentInfo = {
-      address: contractAddress,
-      transactionHash: additionalInfo?.transactionHash,
-      blockNumber,
-      timestamp: block?.timestamp || Date.now() / 1000,
-      deployer: deployer.address,
-      network: networkName,
-      chainId: network.chainId,
-      constructorArgs: additionalInfo?.constructorArgs || [],
-    };
+  const networkName = hre.globalOptions.network || "hardhat";
 
-    // Create deployments directory if it doesn't exist
-    const deploymentsPath = path.join(process.cwd(), DEPLOYMENTS_DIR);
-    await fs.mkdir(deploymentsPath, { recursive: true });
+  const deploymentInfo: DeploymentInfo = {
+    address: contractAddress,
+    network: networkName,
+    chainId: network.chainId.toString(),
+    deployer: deployer.address,
+    blockNumber,
+    timestamp: block?.timestamp || Math.floor(Date.now() / 1000),
+    ...additionalInfo,
+  };
 
-    // Load existing deployments or create new registry
-    const deploymentsFile = path.join(deploymentsPath, DEPLOYMENTS_FILE);
-    let registry: DeploymentRegistry = {};
-
-    try {
-      const existingData = await fs.readFile(deploymentsFile, "utf-8");
-      registry = JSON.parse(existingData);
-    } catch (error) {
-      // File doesn't exist or is invalid, start fresh
-      registry = {};
-    }
-
-    // Update registry with new deployment
-    if (!registry[networkName]) {
-      registry[networkName] = {};
-    }
-    registry[networkName][contractName] = deploymentInfo;
-
-    // Save updated registry
-    await fs.writeFile(
-      deploymentsFile,
-      JSON.stringify(registry, (key, value) =>
-        typeof value === "bigint" ? value.toString() : value,
-        2
-      )
-    );
-
-    // Also save individual deployment file for this network
-    const networkDeploymentFile = path.join(deploymentsPath, `${networkName}.json`);
-    await fs.writeFile(
-      networkDeploymentFile,
-      JSON.stringify(
-        registry[networkName],
-        (key, value) => (typeof value === "bigint" ? value.toString() : value),
-        2
-      )
-    );
-
-    console.log(`\n📝 Deployment info saved to ${deploymentsFile}`);
-  } catch (error) {
-    console.error("Failed to save deployment info:", error);
+  const deploymentsDir = path.join(process.cwd(), "deployments");
+  if (!fs.existsSync(deploymentsDir)) {
+    fs.mkdirSync(deploymentsDir, { recursive: true });
   }
+
+  const filename = `${contractName}-${networkName}.json`;
+  const filepath = path.join(deploymentsDir, filename);
+
+  fs.writeFileSync(filepath, JSON.stringify(deploymentInfo, null, 2));
+
+  console.log(`📝 Deployment info saved to: ${filepath}`);
 }
 
 /**
@@ -110,11 +64,15 @@ export async function loadDeployment(
   networkName: string
 ): Promise<DeploymentInfo | null> {
   try {
-    const deploymentsFile = path.join(process.cwd(), DEPLOYMENTS_DIR, DEPLOYMENTS_FILE);
-    const data = await fs.readFile(deploymentsFile, "utf-8");
-    const registry: DeploymentRegistry = JSON.parse(data);
+    const filename = `${contractName}-${networkName}.json`;
+    const filepath = path.join(process.cwd(), "deployments", filename);
 
-    return registry[networkName]?.[contractName] || null;
+    if (!fs.existsSync(filepath)) {
+      return null;
+    }
+
+    const data = fs.readFileSync(filepath, "utf-8");
+    return JSON.parse(data) as DeploymentInfo;
   } catch (error) {
     return null;
   }
@@ -127,11 +85,29 @@ export async function loadNetworkDeployments(
   networkName: string
 ): Promise<{ [contractName: string]: DeploymentInfo } | null> {
   try {
-    const deploymentsFile = path.join(process.cwd(), DEPLOYMENTS_DIR, DEPLOYMENTS_FILE);
-    const data = await fs.readFile(deploymentsFile, "utf-8");
-    const registry: DeploymentRegistry = JSON.parse(data);
+    const deploymentsDir = path.join(process.cwd(), "deployments");
 
-    return registry[networkName] || null;
+    if (!fs.existsSync(deploymentsDir)) {
+      return null;
+    }
+
+    const files = fs.readdirSync(deploymentsDir);
+    const networkFiles = files.filter(f => f.endsWith(`-${networkName}.json`));
+
+    if (networkFiles.length === 0) {
+      return null;
+    }
+
+    const deployments: { [contractName: string]: DeploymentInfo } = {};
+
+    for (const file of networkFiles) {
+      const contractName = file.replace(`-${networkName}.json`, "");
+      const filepath = path.join(deploymentsDir, file);
+      const data = fs.readFileSync(filepath, "utf-8");
+      deployments[contractName] = JSON.parse(data);
+    }
+
+    return deployments;
   } catch (error) {
     return null;
   }

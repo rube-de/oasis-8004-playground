@@ -1,27 +1,28 @@
 import type { HardhatUserConfig } from "hardhat/config";
+import { config as loadEnv } from "dotenv";
+loadEnv();
 
 import hardhatToolboxMochaEthersPlugin from "@nomicfoundation/hardhat-toolbox-mocha-ethers";
+import hardhatEthersPlugin from "@nomicfoundation/hardhat-ethers";
 import { configVariable } from "hardhat/config";
 
-// Import custom tasks
+// Import tasks
 import {
   deployIdentityRegistry,
   deployReputationRegistry,
   deployValidationRegistry,
   deployAllRegistries,
-  getRegistries,
-  verifyRegistries
-} from "./tasks/deploy.js";
+  getRegistries
+} from "./tasks/index.js";
 
 const config: HardhatUserConfig = {
-  plugins: [hardhatToolboxMochaEthersPlugin],
+  plugins: [hardhatToolboxMochaEthersPlugin, hardhatEthersPlugin],
   tasks: [
     deployIdentityRegistry,
     deployReputationRegistry,
     deployValidationRegistry,
     deployAllRegistries,
     getRegistries,
-    verifyRegistries,
   ],
   solidity: {
     profiles: {
@@ -47,6 +48,11 @@ const config: HardhatUserConfig = {
     hardhatOp: {
       type: "edr-simulated",
       chainType: "op",
+    },
+    localhost: {
+      type: "http",
+      url: "http://127.0.0.1:8545",
+      chainType: "l1",
     },
     sepolia: {
       type: "http",

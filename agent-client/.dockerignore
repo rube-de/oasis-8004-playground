@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Environment files (copied separately)
+.env
+.env.local
+.env.*.local
+
+# Development files
+.python-version
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# Documentation (not needed in container)
+README.md
+*.md
+!pyproject.toml
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Data (use volumes instead)
+data/
+*.db
+*.sqlite
