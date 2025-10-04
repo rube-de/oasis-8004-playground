@@ -1,120 +1,431 @@
-"""Mock domain hosting for ERC-8004 AgentCard.
+"""A2A and ERC-8004 compliant AgentCard implementation.
 
-This module provides the AgentCard data structure and mock implementations
-per ERC-8004 specification and RFC 8615 (Well-Known URIs).
+This module provides AgentCard data structures compliant with:
+- A2A Protocol v0.3.0 (Linux Foundation)
+- ERC-8004 Trustless Agents specification
+- RFC 8615 Well-Known URIs
 
-RFC 8615 Compliance:
-    AgentCard must be hosted at: https://{domain}/.well-known/agent-card.json
+RFC 8615 Hosting Requirement:
+    AgentCard must be served at: https://{domain}/.well-known/agent-card.json
+    Content-Type: application/json
+    CORS: Allow cross-origin requests for agent discovery
 
-    Example: If agent domain is "agent.example.com", the AgentCard should be
-    accessible at: https://agent.example.com/.well-known/agent-card.json
+A2A Protocol Compliance:
+    Implements protocolVersion 0.3.0 with required fields:
+    - protocolVersion, name, description, version, url, preferredTransport
+    - capabilities (nested object with extensions support)
+    - skills array with structured skill definitions
+    - defaultInputModes and defaultOutputModes
 
-ERC-8004 AgentCard Structure:
-    {
-        "name": "Human-readable agent name",
-        "description": "Agent capabilities and purpose",
-        "version": "Semantic version (e.g., 1.0.0)",
-        "capabilities": ["list", "of", "supported", "operations"],
-        "endpoint": "https://api.example.com/agent",
-        "protocol": "Protocol identifier (e.g., A2A-v1)",
-        "metadata": {
-            "optional": "additional fields"
-        }
-    }
+ERC-8004 Extensions:
+    - registrations: Array of blockchain identities with CAIP-10 addresses
+    - trustModels: Supported trust mechanisms (feedback, tee-attestation, etc.)
+    - signatures: Cryptographic proof of address ownership
 
 Future Implementation:
-    - HTTP server (Flask/FastAPI) serving AgentCard
-    - TLS certificate management
-    - Dynamic AgentCard generation from configuration
-    - Health check endpoint
+    - HTTP server (Flask/FastAPI) serving /.well-known/agent-card.json
+    - TLS certificate management for HTTPS
+    - Dynamic AgentCard generation from agent state
+    - JWS signature verification for card integrity
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from typing import Any
+from eth_account import Account
+from eth_account.messages import encode_defunct
+
+
+@dataclass
+class Provider:
+    """Agent provider/organization information."""
+
+    organization: str
+    url: str
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to JSON-serializable dict."""
+        return asdict(self)
+
+
+@dataclass
+class Extension:
+    """A2A protocol extension definition."""
+
+    uri: str
+    description: str
+    required: bool = False
+    params: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to JSON-serializable dict."""
+        return asdict(self)
+
+
+@dataclass
+class Capabilities:
+    """A2A protocol capabilities object."""
+
+    streaming: bool = False
+    pushNotifications: bool = False
+    stateTransitionHistory: bool = False
+    extensions: list[Extension] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to JSON-serializable dict."""
+        return {
+            "streaming": self.streaming,
+            "pushNotifications": self.pushNotifications,
+            "stateTransitionHistory": self.stateTransitionHistory,
+            "extensions": [ext.to_dict() for ext in self.extensions],
+        }
+
+
+@dataclass
+class Skill:
+    """A2A protocol skill definition."""
+
+    id: str
+    name: str
+    description: str
+    tags: list[str] = field(default_factory=list)
+    inputModes: list[str] = field(default_factory=lambda: ["text"])
+    outputModes: list[str] = field(default_factory=lambda: ["text"])
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to JSON-serializable dict."""
+        return asdict(self)
+
+
+@dataclass
+class Registration:
+    """ERC-8004 blockchain registration entry.
+
+    Contains agent identity information from IdentityRegistry including
+    CAIP-10 formatted address and cryptographic signature proving ownership.
+    """
+
+    agentId: int
+    agentAddress: str  # CAIP-10 format: eip155:{chainId}:{address}
+    signature: str  # Hex-encoded signature proving address ownership
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to JSON-serializable dict."""
+        return asdict(self)
 
 
 @dataclass
 class AgentCard:
-    """ERC-8004 AgentCard structure.
+    """A2A Protocol v0.3.0 and ERC-8004 compliant AgentCard.
 
-    Represents discoverable agent metadata per ERC-8004 specification.
-    Hosted at .well-known/agent-card.json per RFC 8615.
+    Represents discoverable agent metadata per A2A Protocol v0.3.0 with
+    ERC-8004 blockchain extensions. Hosted at /.well-known/agent-card.json
+    per RFC 8615.
+
+    A2A Protocol Fields (Required):
+        protocolVersion: A2A protocol version (currently "0.3.0")
+        name: Human-readable agent name
+        description: Agent capabilities and purpose
+        version: Agent version (semantic versioning)
+        url: Primary API endpoint
+        preferredTransport: Preferred communication protocol
+        capabilities: Nested capabilities object
+        skills: Array of agent skills
+        defaultInputModes: Supported input modes
+        defaultOutputModes: Supported output modes
+
+    ERC-8004 Extensions (Required for blockchain agents):
+        registrations: Array of blockchain identities
+        trustModels: Supported trust mechanisms
+
+    Optional Fields:
+        provider: Organization information
+        ValidationRequestsURI: Validation requests endpoint (for server agents)
+        ValidationResponsesURI: Validation responses endpoint (for validators)
+        metadata: Additional custom fields
     """
 
+    # A2A Protocol v0.3.0 required fields
+    protocolVersion: str
     name: str
     description: str
     version: str
-    capabilities: list[str]
-    endpoint: str
-    protocol: str = "A2A-v1"
+    url: str
+    preferredTransport: str
+    capabilities: Capabilities
+    skills: list[Skill]
+    defaultInputModes: list[str]
+    defaultOutputModes: list[str]
+
+    # ERC-8004 required extensions
+    registrations: list[Registration]
+    trustModels: list[str]
+
+    # Optional fields
+    provider: Provider | None = None
+    ValidationRequestsURI: str | None = None
+    ValidationResponsesURI: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert AgentCard to JSON-serializable dictionary."""
-        return {
+        """Convert AgentCard to JSON-serializable dictionary.
+
+        Returns:
+            Complete AgentCard as dict, ready for JSON serialization
+        """
+        result = {
+            "protocolVersion": self.protocolVersion,
             "name": self.name,
             "description": self.description,
             "version": self.version,
-            "capabilities": self.capabilities,
-            "endpoint": self.endpoint,
-            "protocol": self.protocol,
-            "metadata": self.metadata,
+            "url": self.url,
+            "preferredTransport": self.preferredTransport,
+            "capabilities": self.capabilities.to_dict(),
+            "skills": [skill.to_dict() for skill in self.skills],
+            "defaultInputModes": self.defaultInputModes,
+            "defaultOutputModes": self.defaultOutputModes,
+            "registrations": [reg.to_dict() for reg in self.registrations],
+            "trustModels": self.trustModels,
         }
 
+        # Add optional fields if present
+        if self.provider:
+            result["provider"] = self.provider.to_dict()
+        if self.ValidationRequestsURI:
+            result["ValidationRequestsURI"] = self.ValidationRequestsURI
+        if self.ValidationResponsesURI:
+            result["ValidationResponsesURI"] = self.ValidationResponsesURI
+        if self.metadata:
+            result["metadata"] = self.metadata
 
-def generate_mock_agent_card(
-    agent_domain: str,
-    agent_address: str,
-    agent_id: int | None = None,
-) -> AgentCard:
-    """Generate mock AgentCard with sample data.
+        return result
+
+
+def format_caip10_address(chain_id: int, address: str) -> str:
+    """Format Ethereum address as CAIP-10 identifier.
+
+    CAIP-10 defines chain-agnostic account identifiers:
+    https://github.com/ChainAgnostic/CAIPs/blob/master/CAIPs/caip-10.md
 
     Args:
-        agent_domain: Agent's registered domain
-        agent_address: Agent's Ethereum address
-        agent_id: Optional agent ID from IdentityRegistry
+        chain_id: EVM chain ID (e.g., 1 for mainnet, 31337 for hardhat)
+        address: Ethereum address (with or without 0x prefix)
 
     Returns:
-        AgentCard instance with mock data
+        CAIP-10 formatted address: eip155:{chain_id}:{address}
+
+    Example:
+        >>> format_caip10_address(1, "0x1234...5678")
+        "eip155:1:0x1234...5678"
     """
-    metadata = {
-        "agent_domain": agent_domain,
-        "agent_address": agent_address,
-        "blockchain": "ethereum",
-        "network": "hardhat-local",
-    }
+    # Ensure address has 0x prefix
+    if not address.startswith("0x"):
+        address = f"0x{address}"
 
-    if agent_id is not None:
-        metadata["agent_id"] = agent_id
+    return f"eip155:{chain_id}:{address}"
 
+
+def sign_agent_registration(
+    agent_id: int,
+    agent_address: str,
+    agent_domain: str,
+    private_key: str,
+) -> str:
+    """Generate signature proving ownership of agent address.
+
+    Creates a cryptographic signature over agent registration data using
+    Ethereum personal_sign. This proves the agent controls the private key
+    for the registered address.
+
+    Args:
+        agent_id: Agent ID from IdentityRegistry
+        agent_address: Ethereum address (checksummed)
+        agent_domain: Agent domain from registration
+        private_key: Private key for signing (without 0x prefix)
+
+    Returns:
+        Hex-encoded signature (with 0x prefix)
+
+    Example:
+        >>> sig = sign_agent_registration(1, "0x123...", "agent.local", key)
+        >>> sig.startswith("0x")
+        True
+    """
+    # Create message to sign
+    message = f"ERC-8004 Agent Registration\nAgent ID: {agent_id}\nAddress: {agent_address}\nDomain: {agent_domain}"
+
+    # Encode message for Ethereum signing
+    message_hash = encode_defunct(text=message)
+
+    # Ensure private key has 0x prefix for eth_account
+    if not private_key.startswith("0x"):
+        private_key = f"0x{private_key}"
+
+    # Sign message
+    account = Account.from_key(private_key)
+    signed_message = account.sign_message(message_hash)
+
+    # Return hex-encoded signature
+    return signed_message.signature.hex()
+
+
+def generate_agent_card(
+    agent_id: int,
+    agent_address: str,
+    agent_domain: str,
+    chain_id: int,
+    private_key: str,
+    name: str | None = None,
+    description: str | None = None,
+    version: str = "1.0.0",
+) -> AgentCard:
+    """Generate A2A and ERC-8004 compliant AgentCard.
+
+    Creates a complete AgentCard with all required A2A Protocol v0.3.0 fields
+    and ERC-8004 blockchain extensions. Includes cryptographic signature proving
+    address ownership.
+
+    Args:
+        agent_id: Agent ID from IdentityRegistry
+        agent_address: Ethereum address (will be checksummed)
+        agent_domain: Agent domain from registration
+        chain_id: Blockchain chain ID (e.g., 31337 for hardhat)
+        private_key: Private key for signature generation (without 0x)
+        name: Optional custom agent name
+        description: Optional custom description
+        version: Agent version (default: "1.0.0")
+
+    Returns:
+        Complete AgentCard instance ready for JSON serialization
+
+    Example:
+        >>> card = generate_agent_card(1, "0x123...", "agent.local", 31337, key)
+        >>> card.protocolVersion
+        "0.3.0"
+        >>> card.registrations[0].agentId
+        1
+    """
+    # Checksum address
+    checksummed_address = Account._from_eth_account_methods().to_checksum_address(
+        agent_address
+    )
+
+    # Format address as CAIP-10
+    caip10_address = format_caip10_address(chain_id, checksummed_address)
+
+    # Generate signature
+    signature = sign_agent_registration(
+        agent_id, checksummed_address, agent_domain, private_key
+    )
+
+    # Create registration entry
+    registration = Registration(
+        agentId=agent_id,
+        agentAddress=caip10_address,
+        signature=signature,
+    )
+
+    # Define ERC-8004 validation extension
+    erc8004_extension = Extension(
+        uri="https://erc8004.ethereum.org/extensions/validation",
+        description="ERC-8004 Validation Registry support",
+        required=False,
+        params={},
+    )
+
+    # Define capabilities
+    capabilities = Capabilities(
+        streaming=False,
+        pushNotifications=False,
+        stateTransitionHistory=True,
+        extensions=[erc8004_extension],
+    )
+
+    # Define skills
+    skills = [
+        Skill(
+            id="identity.register",
+            name="Identity Registration",
+            description="Register agent in ERC-8004 Identity Registry",
+            tags=["identity", "registration", "blockchain"],
+            inputModes=["text"],
+            outputModes=["text"],
+        ),
+        Skill(
+            id="identity.resolve",
+            name="Identity Resolution",
+            description="Resolve agent identities by ID, address, or domain",
+            tags=["identity", "discovery", "blockchain"],
+            inputModes=["text"],
+            outputModes=["text"],
+        ),
+    ]
+
+    # Set default name and description
+    if name is None:
+        name = f"ERC-8004 Agent {agent_id}"
+    if description is None:
+        description = "ERC-8004 compliant autonomous agent with identity registration capabilities"
+
+    # Create AgentCard
     return AgentCard(
-        name=f"Agent at {agent_domain}",
-        description="ERC-8004 compliant autonomous agent with identity registration",
-        version="0.1.0",
-        capabilities=[
-            "identity.register",
-            "identity.resolve",
-            "identity.update",
-        ],
-        endpoint=f"https://{agent_domain}/api/v1",
-        protocol="A2A-v1",
-        metadata=metadata,
+        protocolVersion="0.3.0",
+        name=name,
+        description=description,
+        version=version,
+        url=f"https://{agent_domain}/api/v1",
+        preferredTransport="JSONRPC",
+        capabilities=capabilities,
+        skills=skills,
+        defaultInputModes=["text"],
+        defaultOutputModes=["text"],
+        registrations=[registration],
+        trustModels=["feedback", "tee-attestation"],
+        provider=Provider(
+            organization="Oasis Protocol",
+            url="https://oasisprotocol.org",
+        ),
+        metadata={
+            "blockchain": "ethereum",
+            "network": f"chain-{chain_id}",
+            "erc8004_version": "1.0",
+        },
     )
 
 
 # Future: HTTP server implementation
 #
-# from flask import Flask, jsonify
+# from flask import Flask, jsonify, request
+# from flask_cors import CORS
 #
 # app = Flask(__name__)
+# CORS(app)  # Enable CORS for agent discovery
 #
 # @app.route('/.well-known/agent-card.json')
 # def serve_agent_card():
-#     """Serve AgentCard at RFC 8615 compliant path."""
-#     card = generate_mock_agent_card(...)
-#     return jsonify(card.to_dict())
+#     """Serve AgentCard at RFC 8615 compliant path.
+#
+#     Returns:
+#         JSON response with AgentCard data
+#         Content-Type: application/json
+#     """
+#     # Load agent state
+#     agent_state = load_agent_state()
+#
+#     # Generate AgentCard
+#     card = generate_agent_card(
+#         agent_id=agent_state['agent_id'],
+#         agent_address=agent_state['agent_address'],
+#         agent_domain=agent_state['agent_domain'],
+#         chain_id=agent_state['chain_id'],
+#         private_key=get_private_key(),
+#     )
+#
+#     return jsonify(card.to_dict()), 200, {
+#         'Content-Type': 'application/json',
+#         'Cache-Control': 'public, max-age=300',  # 5 min cache
+#     }
 #
 # @app.route('/health')
 # def health_check():
 #     """Health check endpoint for monitoring."""
-#     return jsonify({"status": "healthy"})
+#     return jsonify({"status": "healthy"}), 200

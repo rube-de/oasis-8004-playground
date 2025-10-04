@@ -15,6 +15,11 @@ class Config(BaseConfig):
         - PRIVATE_KEY: Private key for transaction signing (without 0x prefix)
         - AGENT_DOMAIN: Domain for agent registration (RFC 8615 compliant)
 
+    Optional AgentCard Customization:
+        - AGENT_NAME: Custom agent name for AgentCard (default: auto-generated)
+        - AGENT_DESCRIPTION: Custom agent description for AgentCard
+        - AGENT_VERSION: Agent version for AgentCard (default: "1.0.0")
+
     Inherited from BaseConfig:
         - RPC_URL: Ethereum RPC endpoint URL
         - IDENTITY_REGISTRY_ADDRESS: Deployed IdentityRegistry contract address
@@ -39,6 +44,22 @@ class Config(BaseConfig):
     agent_domain: str = Field(
         ...,
         description="Domain for agent registration (RFC 8615 compliant)",
+    )
+
+    # Optional AgentCard customization fields
+    agent_name: str | None = Field(
+        default=None,
+        description="Custom agent name for AgentCard (defaults to 'ERC-8004 Agent {id}')",
+    )
+
+    agent_description: str | None = Field(
+        default=None,
+        description="Custom agent description for AgentCard",
+    )
+
+    agent_version: str = Field(
+        default="1.0.0",
+        description="Agent version for AgentCard (semantic versioning)",
     )
 
     @field_validator("private_key")

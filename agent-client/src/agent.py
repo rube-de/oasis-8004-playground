@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 from .config import Config
+from .domain_mock import generate_agent_card
 from erc8004_common.utils.contract_utility import ContractUtility, ContractUtilityError
 from erc8004_common.plugins.identity_registry import IdentityRegistryPlugin
 from erc8004_common.plugins.base import (
@@ -48,6 +49,7 @@ class Agent:
 
     STATE_DIR = Path("/app/data")
     STATE_FILE = STATE_DIR / "agent_state.json"
+    AGENT_CARD_FILE = STATE_DIR / "agent-card.json"
     HEARTBEAT_INTERVAL = 60  # seconds
 
     def __init__(self):
@@ -159,6 +161,11 @@ class Agent:
                     )
                     self.agent_id = agent_id
                     self._save_state()
+
+                    # Generate AgentCard if not already exists
+                    if not self.AGENT_CARD_FILE.exists():
+                        self.generate_and_save_agent_card()
+
                     return agent_id
         except Exception:
             # Not found, proceed with registration
@@ -179,6 +186,9 @@ class Agent:
 
             # Persist state
             self._save_state()
+
+            # Generate and save AgentCard
+            self.generate_and_save_agent_card()
 
             return self.agent_id
 
@@ -307,6 +317,57 @@ class Agent:
             health["healthy"] = False
 
         return health
+
+    def generate_and_save_agent_card(self) -> None:
+        """Generate A2A and ERC-8004 compliant AgentCard and save to disk.
+
+        Creates AgentCard with current agent state including registration data,
+        CAIP-10 formatted address, and cryptographic signature proving ownership.
+        Saves to agent-card.json in data directory.
+
+        Raises:
+            AgentError: If AgentCard generation or save fails
+        """
+        if not self.agent_id:
+            raise AgentError("Cannot generate AgentCard: agent not registered")
+
+        if not self.config:
+            raise AgentError("Cannot generate AgentCard: config not loaded")
+
+        if not self.contract_utility or not self.contract_utility.account:
+            raise AgentError("Cannot generate AgentCard: contract utility not initialized")
+
+        try:
+            # Get chain ID from Web3 connection
+            chain_id = self.contract_utility.w3.eth.chain_id
+
+            # Generate AgentCard
+            agent_card = generate_agent_card(
+                agent_id=self.agent_id,
+                agent_address=self.contract_utility.account.address,
+                agent_domain=self.config.agent_domain,
+                chain_id=chain_id,
+                private_key=self.config.private_key,
+                name=getattr(self.config, "agent_name", None),
+                description=getattr(self.config, "agent_description", None),
+                version=getattr(self.config, "agent_version", "1.0.0"),
+            )
+
+            # Ensure data directory exists
+            self.STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+            # Save AgentCard to JSON file
+            with open(self.AGENT_CARD_FILE, "w") as f:
+                json.dump(agent_card.to_dict(), f, indent=2)
+
+            logger.info(f"✓ AgentCard saved to {self.AGENT_CARD_FILE}")
+            logger.debug(
+                f"AgentCard: protocolVersion={agent_card.protocolVersion}, "
+                f"trustModels={agent_card.trustModels}"
+            )
+
+        except Exception as e:
+            raise AgentError(f"Failed to generate AgentCard: {e}") from e
 
     def _handle_shutdown_signal(self, signum: int, _frame: object) -> None:
         """Handle shutdown signals (SIGTERM, SIGINT)."""
