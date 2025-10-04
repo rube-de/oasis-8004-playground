@@ -14,12 +14,16 @@ COPY contracts/artifacts/contracts/IdentityRegistry.sol/IdentityRegistry.json /a
 COPY contracts/artifacts/contracts/ReputationRegistry.sol/ReputationRegistry.json /app/abis/
 COPY contracts/artifacts/contracts/ValidationRegistry.sol/ValidationRegistry.json /app/abis/
 
-# Copy dependency declarations
-COPY agent-client/pyproject.toml agent-client/uv.lock /app/
+# Copy common package (dependency) BEFORE pyproject.toml
+COPY common/ /app/common/
 
-# Install dependencies using pre-installed uv
-# --frozen ensures reproducible builds from uv.lock (fails if lock is out of sync)
-# --no-dev excludes development dependencies
+# Copy dependency declarations
+COPY agent-client/pyproject.toml /app/
+
+# Generate lock file in Docker environment with correct paths
+RUN uv lock
+
+# Install dependencies from generated lock file
 RUN uv sync --frozen --no-dev
 
 # Copy application source code

@@ -12,9 +12,9 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 from .config import Config
-from .utils.contract_utility import ContractUtility, ContractUtilityError
-from .plugins.identity_registry import IdentityRegistryPlugin
-from .plugins.base import (
+from erc8004_common.utils.contract_utility import ContractUtility, ContractUtilityError
+from erc8004_common.plugins.identity_registry import IdentityRegistryPlugin
+from erc8004_common.plugins.base import (
     PluginInitializationError,
     PluginExecutionError,
 )
