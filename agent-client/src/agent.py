@@ -13,8 +13,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 from .config import Config
-from .domain_mock import generate_agent_card
 from . import api_server
+from erc8004_common.utils.agent_card import generate_agent_card
 from erc8004_common.utils.contract_utility import ContractUtility, ContractUtilityError
 from erc8004_common.plugins.identity_registry import IdentityRegistryPlugin
 from erc8004_common.plugins.base import (
@@ -360,7 +360,7 @@ class Agent:
                 agent_address=self.contract_utility.account.address,
                 agent_domain=self.config.agent_domain,
                 chain_id=chain_id,
-                private_key=self.config.private_key,
+                account=self.contract_utility.account,
                 name=getattr(self.config, "agent_name", None),
                 description=getattr(self.config, "agent_description", None),
                 version=getattr(self.config, "agent_version", "1.0.0"),

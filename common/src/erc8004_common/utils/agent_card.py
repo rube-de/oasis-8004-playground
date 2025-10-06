@@ -229,7 +229,7 @@ def sign_agent_registration(
     agent_id: int,
     agent_address: str,
     agent_domain: str,
-    private_key: str,
+    account: Account,
 ) -> str:
     """Generate signature proving ownership of agent address.
 
@@ -241,13 +241,14 @@ def sign_agent_registration(
         agent_id: Agent ID from IdentityRegistry
         agent_address: Ethereum address (checksummed)
         agent_domain: Agent domain from registration
-        private_key: Private key for signing (without 0x prefix)
+        account: Web3 Account object for signing
 
     Returns:
         Hex-encoded signature (with 0x prefix)
 
     Example:
-        >>> sig = sign_agent_registration(1, "0x123...", "agent.local", key)
+        >>> account = Account.from_key(private_key)
+        >>> sig = sign_agent_registration(1, "0x123...", "agent.local", account)
         >>> sig.startswith("0x")
         True
     """
@@ -257,12 +258,7 @@ def sign_agent_registration(
     # Encode message for Ethereum signing
     message_hash = encode_defunct(text=message)
 
-    # Ensure private key has 0x prefix for eth_account
-    if not private_key.startswith("0x"):
-        private_key = f"0x{private_key}"
-
     # Sign message
-    account = Account.from_key(private_key)
     signed_message = account.sign_message(message_hash)
 
     # Return hex-encoded signature
@@ -274,7 +270,7 @@ def generate_agent_card(
     agent_address: str,
     agent_domain: str,
     chain_id: int,
-    private_key: str,
+    account: Account,
     name: str | None = None,
     description: str | None = None,
     version: str = "1.0.0",
@@ -290,7 +286,7 @@ def generate_agent_card(
         agent_address: Ethereum address (will be checksummed)
         agent_domain: Agent domain from registration
         chain_id: Blockchain chain ID (e.g., 31337 for hardhat)
-        private_key: Private key for signature generation (without 0x)
+        account: Web3 Account object for signature generation
         name: Optional custom agent name
         description: Optional custom description
         version: Agent version (default: "1.0.0")
@@ -299,7 +295,8 @@ def generate_agent_card(
         Complete AgentCard instance ready for JSON serialization
 
     Example:
-        >>> card = generate_agent_card(1, "0x123...", "agent.local", 31337, key)
+        >>> account = Account.from_key(private_key)
+        >>> card = generate_agent_card(1, "0x123...", "agent.local", 31337, account)
         >>> card.protocolVersion
         "0.3.0"
         >>> card.registrations[0].agentId
@@ -313,7 +310,7 @@ def generate_agent_card(
 
     # Generate signature
     signature = sign_agent_registration(
-        agent_id, checksummed_address, agent_domain, private_key
+        agent_id, checksummed_address, agent_domain, account
     )
 
     # Create registration entry

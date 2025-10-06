@@ -5,7 +5,7 @@ Extends BaseConfig from erc8004_common with client-specific settings.
 """
 
 from pydantic import Field, field_validator
-from erc8004_common.config import BaseConfig
+from erc8004_common.utils.config import BaseConfig
 
 
 class Config(BaseConfig):
