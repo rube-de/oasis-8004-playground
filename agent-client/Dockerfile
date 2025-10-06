@@ -36,10 +36,8 @@ RUN useradd -m -u 1000 -s /bin/bash agent && \
 # Switch to non-root user
 USER agent
 
-# Add health check
-# Verifies Python can import main module (using uv's virtual environment)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD uv run python -c "import src.main" || exit 1
+# Expose API server port
+EXPOSE 8000
 
 # Configure signal handling for graceful shutdown
 STOPSIGNAL SIGTERM

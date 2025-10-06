@@ -12,16 +12,20 @@ services:
     env_file:
       - .env
 
+    # Expose API server port
+    ports:
+      - "8000:8000"
+
     # Restart policy for long-running container
     restart: unless-stopped
 
-    # Health check configuration
+    # Health check configuration (HTTP-based via API server)
     healthcheck:
-      test: ["CMD", "uv", "run", "python", "-c", "import src.main"]
+      test: ["CMD", "uv", "run", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 5s
+      start_period: 10s
 
     # Logging configuration
     logging:

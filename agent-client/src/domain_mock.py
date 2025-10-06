@@ -33,6 +33,7 @@ from dataclasses import dataclass, field, asdict
 from typing import Any
 from eth_account import Account
 from eth_account.messages import encode_defunct
+from eth_utils import to_checksum_address
 
 
 @dataclass
@@ -305,9 +306,7 @@ def generate_agent_card(
         1
     """
     # Checksum address
-    checksummed_address = Account._from_eth_account_methods().to_checksum_address(
-        agent_address
-    )
+    checksummed_address = to_checksum_address(agent_address)
 
     # Format address as CAIP-10
     caip10_address = format_caip10_address(chain_id, checksummed_address)

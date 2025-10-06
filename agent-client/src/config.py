@@ -20,6 +20,9 @@ class Config(BaseConfig):
         - AGENT_DESCRIPTION: Custom agent description for AgentCard
         - AGENT_VERSION: Agent version for AgentCard (default: "1.0.0")
 
+    Optional API Server Configuration:
+        - API_PORT: Port for AgentCard API server (default: 8000)
+
     Inherited from BaseConfig:
         - RPC_URL: Ethereum RPC endpoint URL
         - IDENTITY_REGISTRY_ADDRESS: Deployed IdentityRegistry contract address
@@ -60,6 +63,14 @@ class Config(BaseConfig):
     agent_version: str = Field(
         default="1.0.0",
         description="Agent version for AgentCard (semantic versioning)",
+    )
+
+    # API server configuration
+    api_port: int = Field(
+        default=8000,
+        description="Port for AgentCard API server (default: 8000)",
+        ge=1024,
+        le=65535,
     )
 
     @field_validator("private_key")

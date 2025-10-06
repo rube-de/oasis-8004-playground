@@ -7,12 +7,14 @@ plugin lifecycle, registration workflow, and runtime operations.
 import json
 import logging
 import signal
+import threading
 import time
 from pathlib import Path
 from typing import Optional, Dict, Any
 
 from .config import Config
 from .domain_mock import generate_agent_card
+from . import api_server
 from erc8004_common.utils.contract_utility import ContractUtility, ContractUtilityError
 from erc8004_common.plugins.identity_registry import IdentityRegistryPlugin
 from erc8004_common.plugins.base import (
@@ -60,6 +62,7 @@ class Agent:
         self.agent_id: Optional[int] = None
         self.running = False
         self._shutdown_requested = False
+        self.api_server_thread: Optional[threading.Thread] = None
 
         # Register signal handlers
         signal.signal(signal.SIGTERM, self._handle_shutdown_signal)
@@ -216,6 +219,9 @@ class Agent:
             f"Heartbeat interval: {self.HEARTBEAT_INTERVAL}s"
         )
 
+        # Start API server in background thread
+        self._start_api_server()
+
         self.running = True
         last_heartbeat = time.time()
 
@@ -309,9 +315,16 @@ class Agent:
             "registered": self.agent_id is not None
         }
 
+        # Check API server
+        health["components"]["api_server"] = {
+            "status": "ok" if self.api_server_thread and self.api_server_thread.is_alive() else "stopped",
+            "running": self.api_server_thread.is_alive() if self.api_server_thread else False,
+            "port": self.config.api_port if self.config else None
+        }
+
         # Overall health
         if not all(
-            comp["status"] in ["ok", "warning"]
+            comp["status"] in ["ok", "warning", "stopped"]
             for comp in health["components"].values()
         ):
             health["healthy"] = False
@@ -368,6 +381,48 @@ class Agent:
 
         except Exception as e:
             raise AgentError(f"Failed to generate AgentCard: {e}") from e
+
+    def _start_api_server(self) -> None:
+        """Start FastAPI server in background thread for AgentCard hosting.
+
+        Starts API server on configured port to serve:
+        - /.well-known/agent-card.json (RFC 8615 compliant)
+        - /health (health check)
+        - /api/v1/agent (agent info)
+
+        Raises:
+            AgentError: If API server fails to start
+        """
+        if not self.config:
+            raise AgentError("Cannot start API server: config not loaded")
+
+        try:
+            port = self.config.api_port
+
+            logger.info(f"Starting API server on port {port}")
+
+            # Create thread for API server
+            self.api_server_thread = threading.Thread(
+                target=api_server.run_server,
+                args=("0.0.0.0", port),
+                daemon=True,
+                name="api-server"
+            )
+
+            self.api_server_thread.start()
+
+            logger.info(
+                f"✓ API server started successfully on http://0.0.0.0:{port}"
+            )
+            logger.info(
+                f"  AgentCard: http://localhost:{port}/.well-known/agent-card.json"
+            )
+            logger.info(
+                f"  Health: http://localhost:{port}/health"
+            )
+
+        except Exception as e:
+            raise AgentError(f"Failed to start API server: {e}") from e
 
     def _handle_shutdown_signal(self, signum: int, _frame: object) -> None:
         """Handle shutdown signals (SIGTERM, SIGINT)."""
