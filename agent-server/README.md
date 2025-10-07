@@ -207,6 +207,18 @@ After successful registration, the agent automatically generates an **A2A Protoc
       "name": "Identity Registration",
       "description": "Register agent in ERC-8004 Identity Registry",
       "tags": ["identity", "registration", "blockchain"]
+    },
+    {
+      "id": "identity.resolve",
+      "name": "Identity Resolution",
+      "description": "Resolve agent identities by ID, address, or domain",
+      "tags": ["identity", "discovery", "blockchain"]
+    },
+    {
+      "id": "price.fetch",
+      "name": "Cryptocurrency Price Fetching",
+      "description": "Fetch real-time cryptocurrency prices from Binance",
+      "tags": ["price", "cryptocurrency", "binance", "market-data"]
     }
   ],
   "defaultInputModes": ["text"],
@@ -255,6 +267,7 @@ The agent automatically starts a **FastAPI server** on port 8001 to serve the Ag
 | `/.well-known/agent-card.json` | GET | RFC 8615 compliant AgentCard (A2A Protocol v0.3.0) |
 | `/health` | GET | Health check endpoint for monitoring |
 | `/api/v1/agent` | GET | Agent registration information |
+| `/api/v1/skills/price` | POST | Fetch cryptocurrency price from Binance |
 | `/` | GET | API metadata and available endpoints |
 | `/api/docs` | GET | Interactive API documentation (Swagger UI) |
 
@@ -296,6 +309,56 @@ curl http://localhost:8001/health
 ```json
 {
   "status": "healthy"
+}
+```
+
+**Get Cryptocurrency Price:**
+```bash
+# BTC-USD format
+curl -X POST http://localhost:8001/api/v1/skills/price \
+  -H "Content-Type: application/json" \
+  -d '{"symbol": "BTC-USD"}'
+
+# BTCUSDT format (native Binance format)
+curl -X POST http://localhost:8001/api/v1/skills/price \
+  -H "Content-Type: application/json" \
+  -d '{"symbol": "BTCUSDT"}'
+
+# ETH-USD
+curl -X POST http://localhost:8001/api/v1/skills/price \
+  -H "Content-Type: application/json" \
+  -d '{"symbol": "ETH-USD"}'
+```
+
+**Response:**
+```json
+{
+  "symbol": "BTCUSDT",
+  "price": 45000.50,
+  "timestamp": "2025-10-07T12:34:56.789Z"
+}
+```
+
+**Error Responses:**
+
+Invalid symbol (400):
+```json
+{
+  "detail": "Symbol INVALIDUSD not found on Binance. Check symbol format (e.g., BTC-USD, ETHUSDT)."
+}
+```
+
+Rate limit exceeded (429):
+```json
+{
+  "detail": "Binance API rate limit exceeded. Please try again later."
+}
+```
+
+Network error (503):
+```json
+{
+  "detail": "Failed to connect to Binance API: Connection timeout"
 }
 ```
 
@@ -500,7 +563,7 @@ When contracts change:
 
 ## Security Notes
 
-  **Development Only**: Current setup uses plaintext private keys in `.env`
+ï¿½ **Development Only**: Current setup uses plaintext private keys in `.env`
 
 For production:
 - Use hardware wallets or key management services

@@ -354,6 +354,14 @@ def generate_agent_card(
             inputModes=["text"],
             outputModes=["text"],
         ),
+        Skill(
+            id="price.fetch",
+            name="Cryptocurrency Price Fetching",
+            description="Fetch real-time cryptocurrency prices from Binance",
+            tags=["price", "cryptocurrency", "binance", "market-data"],
+            inputModes=["text"],
+            outputModes=["text", "json"],
+        ),
     ]
 
     # Set default name and description

@@ -12,7 +12,10 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 import uvicorn
+
+from .skills.price_fetcher import get_price, PriceFetchError, InvalidSymbolError, NetworkError, RateLimitError
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +23,23 @@ logger = logging.getLogger(__name__)
 # AgentCard file path
 AGENT_CARD_PATH = Path("/app/data/agent-card.json")
 AGENT_STATE_PATH = Path("/app/data/agent_state.json")
+
+
+# Request/Response models
+class PriceRequest(BaseModel):
+    """Request model for price fetching."""
+    symbol: str = Field(
+        ...,
+        description="Trading pair symbol (e.g., 'BTC-USD', 'BTCUSDT')",
+        examples=["BTC-USD", "ETH-USD", "BTCUSDT"],
+    )
+
+
+class PriceResponse(BaseModel):
+    """Response model for price data."""
+    symbol: str = Field(..., description="Normalized symbol in Binance format")
+    price: float = Field(..., description="Current price")
+    timestamp: str = Field(..., description="UTC timestamp of the price")
 
 
 def create_app() -> FastAPI:
@@ -36,12 +56,12 @@ def create_app() -> FastAPI:
         redoc_url="/api/redoc",
     )
 
-    # CORS middleware for agent discovery
+    # CORS middleware for agent discovery and skills
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],  # Allow all origins for agent discovery
         allow_credentials=False,
-        allow_methods=["GET", "HEAD", "OPTIONS"],
+        allow_methods=["GET", "POST", "HEAD", "OPTIONS"],  # Added POST for skills
         allow_headers=["*"],
         max_age=600,  # Cache preflight requests for 10 minutes
     )
@@ -148,6 +168,45 @@ def create_app() -> FastAPI:
             logger.error(f"Error reading agent state: {e}")
             raise HTTPException(status_code=500, detail="Internal server error")
 
+    @app.post(
+        "/api/v1/skills/price",
+        tags=["Skills"],
+        summary="Get cryptocurrency price",
+        description="Fetch real-time cryptocurrency price from Binance",
+        response_model=PriceResponse,
+    )
+    async def get_crypto_price(request: PriceRequest) -> PriceResponse:
+        """Fetch cryptocurrency price from Binance API.
+
+        Args:
+            request: Price request with symbol
+
+        Returns:
+            Price response with current price and timestamp
+
+        Raises:
+            HTTPException: 400 for invalid symbol, 429 for rate limit, 503 for network errors
+        """
+        try:
+            price_data = await get_price(request.symbol)
+            return PriceResponse(**price_data)
+
+        except InvalidSymbolError as e:
+            logger.warning(f"Invalid symbol requested: {request.symbol}")
+            raise HTTPException(status_code=400, detail=str(e))
+
+        except RateLimitError as e:
+            logger.warning("Binance API rate limit exceeded")
+            raise HTTPException(status_code=429, detail=str(e))
+
+        except NetworkError as e:
+            logger.error(f"Network error fetching price: {e}")
+            raise HTTPException(status_code=503, detail=str(e))
+
+        except PriceFetchError as e:
+            logger.error(f"Unexpected error fetching price: {e}")
+            raise HTTPException(status_code=500, detail="Internal server error")
+
     @app.get(
         "/",
         tags=["Info"],
@@ -167,6 +226,7 @@ def create_app() -> FastAPI:
             "endpoints": {
                 "agent_card": "/.well-known/agent-card.json",
                 "agent_info": "/api/v1/agent",
+                "price_skill": "/api/v1/skills/price",
                 "health": "/health",
                 "docs": "/api/docs",
             },
