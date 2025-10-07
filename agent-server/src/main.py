@@ -1,0 +1,194 @@
+"""Main entry point for ERC-8004 agent server.
+
+Handles application startup, logging configuration, registration workflow,
+and long-running agent operations. Provides proper error handling and
+graceful shutdown.
+"""
+
+import logging
+import sys
+from pathlib import Path
+from typing import NoReturn
+
+from .agent import Agent, AgentError
+from .config import Config
+
+
+def setup_logging(log_level: str = "INFO") -> None:
+    """Configure structured logging for the application.
+
+    Sets up logging with timestamps, log levels, and proper formatting.
+    Logs are output to stdout for Docker container compatibility.
+
+    Args:
+        log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+    """
+    # Configure root logger
+    logging.basicConfig(
+        level=getattr(logging, log_level.upper()),
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+
+    # Set specific logger levels
+    logging.getLogger("web3").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+
+def display_banner() -> None:
+    """Display application banner on startup."""
+    print("=" * 60)
+    print("  ERC-8004 Agent Server")
+    print("  Identity Registry Integration")
+    print("=" * 60)
+    print()
+
+
+def display_startup_success(agent: Agent) -> None:
+    """Display successful startup information.
+
+    Args:
+        agent: Initialized and registered agent instance
+    """
+    print()
+    print("✓" + "=" * 59)
+    print("  AGENT REGISTRATION SUCCESSFUL")
+    print("=" * 60)
+    print(f"  Agent ID:      {agent.agent_id}")
+    if agent.config:
+        print(f"  Domain:        {agent.config.agent_domain}")
+    if agent.contract_utility and agent.contract_utility.account:
+        print(f"  Address:       {agent.contract_utility.account.address}")
+    print("=" * 60)
+    print()
+
+
+def display_error(error: Exception, context: str = "") -> None:
+    """Display error information with helpful suggestions.
+
+    Args:
+        error: The exception that occurred
+        context: Additional context about when the error occurred
+    """
+    print()
+    print("✗" + "=" * 59)
+    print("  ERROR")
+    if context:
+        print(f"  Context: {context}")
+    print("=" * 60)
+    print(f"  {type(error).__name__}: {error}")
+    print("=" * 60)
+    print()
+    print("Suggestions:")
+
+    # Provide context-specific suggestions
+    error_msg = str(error).lower()
+
+    if "connection" in error_msg or "rpc" in error_msg:
+        print("  • Verify RPC_URL is correct and the node is running")
+        print("  • Check network connectivity")
+        print("  • Ensure firewall allows connections to RPC endpoint")
+    elif "private key" in error_msg or "signing" in error_msg:
+        print("  • Verify PRIVATE_KEY is correct (without 0x prefix)")
+        print("  • Ensure private key has sufficient permissions")
+        print("  • Check that the key matches the expected address")
+    elif "contract" in error_msg or "abi" in error_msg:
+        print("  • Verify IDENTITY_REGISTRY_ADDRESS is correct")
+        print("  • Ensure contract is deployed at the specified address")
+        print("  • Check that ABI files are present in /app/abis/")
+    elif "gas" in error_msg:
+        print("  • Ensure account has sufficient funds for gas")
+        print("  • Try increasing GAS_MULTIPLIER in configuration")
+        print("  • Check network congestion and gas prices")
+    elif "domain" in error_msg:
+        print("  • Verify AGENT_DOMAIN is RFC 8615 compliant")
+        print("  • Ensure domain format is correct")
+    else:
+        print("  • Check all environment variables in .env file")
+        print("  • Review logs above for more details")
+        print("  • Ensure all prerequisites are met")
+
+    print()
+
+
+def main() -> NoReturn:
+    """Main application entry point.
+
+    Orchestrates the complete agent lifecycle:
+    1. Load configuration
+    2. Setup logging
+    3. Initialize agent
+    4. Ensure registration (check existing or register new)
+    5. Run main event loop
+
+    Exits with appropriate status codes:
+    - 0: Successful execution
+    - 1: Error occurred
+    """
+    logger = logging.getLogger(__name__)
+    agent: Agent | None = None
+
+    try:
+        # Load configuration first to get log level
+        config = Config()
+
+        # Setup logging with configured level
+        setup_logging(config.log_level)
+
+        # Display banner
+        display_banner()
+
+        logger.info("Starting ERC-8004 Agent Server")
+        logger.info(f"Configuration loaded from environment")
+        logger.debug(f"RPC URL: {config.rpc_url}")
+        logger.debug(f"Agent Domain: {config.agent_domain}")
+        logger.debug(f"Identity Registry: {config.identity_registry_address}")
+
+        # Initialize agent
+        logger.info("Initializing agent...")
+        agent = Agent()
+        agent.initialize()
+        logger.info("Agent initialized successfully")
+
+        # Ensure agent is registered
+        logger.info("Checking registration status...")
+        agent_id = agent.ensure_registered()
+
+        if agent_id:
+            logger.info(f"Agent operational with ID: {agent_id}")
+            display_startup_success(agent)
+        else:
+            raise AgentError("Registration failed: no agent ID returned")
+
+        # Run main event loop
+        logger.info("Starting main event loop...")
+        agent.run()
+
+        # Graceful shutdown (should not reach here normally)
+        logger.info("Agent stopped")
+        sys.exit(0)
+
+    except KeyboardInterrupt:
+        logger.info("Keyboard interrupt received")
+        if agent:
+            agent.shutdown()
+        sys.exit(0)
+
+    except AgentError as e:
+        logger.error(f"Agent error: {e}", exc_info=True)
+        display_error(e, "Agent operation failed")
+        if agent:
+            agent.shutdown()
+        sys.exit(1)
+
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}", exc_info=True)
+        display_error(e, "Unexpected error occurred")
+        if agent:
+            agent.shutdown()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

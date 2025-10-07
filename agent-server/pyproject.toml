@@ -1,7 +1,18 @@
 [project]
 name = "agent-server"
 version = "0.1.0"
-description = "Add your description here"
+description = "ERC-8004 Identity Registry agent server"
 readme = "README.md"
-requires-python = ">=3.11"
-dependencies = []
+requires-python = ">=3.12"
+dependencies = [
+    "erc8004-common",
+    "python-dotenv>=1.0.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+]
+
+[project.scripts]
+agent-server = "src.main:main"
+
+[tool.uv.sources]
+erc8004-common = { path = "./common", editable = true }

@@ -1,0 +1,35 @@
+services:
+  agent-server:
+    build:
+      # Build context is parent directory to access contracts
+      context: ..
+      dockerfile: agent-server/Dockerfile
+    platform: linux/amd64
+    image: ghcr.io/rube-de/agent-server:latest
+    container_name: erc8004-agent-server
+
+    # Load environment variables from .env file
+    env_file:
+      - .env
+
+    # Expose API server port (8001 for server)
+    ports:
+      - "8001:8001"
+
+    # Restart policy for long-running container
+    restart: unless-stopped
+
+    # Health check configuration (HTTP-based via API server)
+    healthcheck:
+      test: ["CMD", "uv", "run", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
