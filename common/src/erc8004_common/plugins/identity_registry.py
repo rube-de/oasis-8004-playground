@@ -103,9 +103,8 @@ class IdentityRegistryPlugin(BaseRegistryPlugin):
     def _send_registration_transaction(self, agent_domain: str, agent_address: str) -> HexBytes:
         """Build and send registration transaction. Returns tx hash."""
         try:
-            # Send transaction with explicit gas price
+            # Send transaction - Web3 middleware will add "from" automatically
             tx_hash = self.contract.functions.newAgent(agent_domain, agent_address).transact({
-                "from": agent_address,
                 "gas": 300000,
                 "gasPrice": self.contract_utility.w3.eth.gas_price,
             })
