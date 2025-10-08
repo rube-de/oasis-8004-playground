@@ -67,10 +67,16 @@ class Config(BaseConfig):
 
     # API server configuration
     api_port: int = Field(
-        default=8000,
-        description="Port for AgentCard API server (default: 8000)",
-        ge=1024,
+        default=80,
+        description="Port for AgentCard API server (default: 80 for Docker)",
+        ge=1,
         le=65535,
+    )
+
+    # Optional agent discovery configuration
+    agent_server_address: str | None = Field(
+        default=None,
+        description="Optional: Agent server address to discover on startup (e.g., 0x123...)",
     )
 
     @field_validator("private_key")

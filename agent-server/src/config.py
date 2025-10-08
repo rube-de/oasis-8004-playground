@@ -65,11 +65,11 @@ class Config(BaseConfig):
         description="Agent version for AgentCard (semantic versioning)",
     )
 
-    # API server configuration (default port 8001 for server)
+    # API server configuration (default port 80 for Docker)
     api_port: int = Field(
-        default=8001,
-        description="Port for AgentCard API server (default: 8001 for server)",
-        ge=1024,
+        default=80,
+        description="Port for AgentCard API server (default: 80 for Docker)",
+        ge=1,
         le=65535,
     )
 

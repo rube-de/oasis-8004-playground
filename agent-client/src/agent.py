@@ -200,6 +200,82 @@ class Agent:
         except Exception as e:
             raise AgentError(f"Unexpected registration error: {e}") from e
 
+    async def discover_server_agent(self, server_address: str) -> None:
+        """Discover agent server and log its capabilities.
+
+        Performs complete agent discovery workflow:
+        1. Resolve server address to domain via IdentityRegistry
+        2. Fetch AgentCard from RFC 8615 endpoint
+        3. Parse and log agent capabilities and skills
+
+        Args:
+            server_address: Ethereum address of agent server to discover
+
+        Raises:
+            AgentError: If discovery fails (agent not found, network error, etc.)
+
+        Example:
+            >>> await agent.discover_server_agent("0x123...")
+            🔍 Discovering agent at address: 0x123...
+            ✅ Discovered agent: Server Agent
+               Skills (3):
+               - Identity Registration: Register agent in ERC-8004 Identity Registry
+        """
+        from erc8004_common.utils.agent_discovery import (
+            discover_agent,
+            AgentDiscoveryError,
+        )
+
+        logger.info(f"🔍 Discovering agent at address: {server_address}")
+
+        try:
+            # Discover agent via registry and fetch AgentCard
+            agent_card = await discover_agent(server_address, self.identity_plugin)
+
+            # Log agent information
+            logger.info(f"✅ Discovered agent: {agent_card.name}")
+            logger.info(f"   Description: {agent_card.description}")
+            logger.info(f"   Version: {agent_card.version}")
+            logger.info(f"   Protocol: {agent_card.protocolVersion}")
+
+            # Log blockchain registrations
+            if agent_card.registrations:
+                reg = agent_card.registrations[0]
+                logger.info(f"   Agent ID: {reg.agentId}")
+                logger.info(f"   Address: {reg.agentAddress}")
+
+            # Log capabilities
+            logger.info(f"   Capabilities:")
+            logger.info(f"   - Streaming: {agent_card.capabilities.streaming}")
+            logger.info(
+                f"   - Push Notifications: {agent_card.capabilities.pushNotifications}"
+            )
+            logger.info(
+                f"   - State History: {agent_card.capabilities.stateTransitionHistory}"
+            )
+
+            # Log skills
+            logger.info(f"   Skills ({len(agent_card.skills)}):")
+            for skill in agent_card.skills:
+                logger.info(f"   - {skill.name}: {skill.description}")
+                if skill.tags:
+                    logger.info(f"     Tags: {', '.join(skill.tags)}")
+                logger.info(
+                    f"     Input: {', '.join(skill.inputModes)} | "
+                    f"Output: {', '.join(skill.outputModes)}"
+                )
+
+            # Log trust models
+            if agent_card.trustModels:
+                logger.info(f"   Trust Models: {', '.join(agent_card.trustModels)}")
+
+        except AgentDiscoveryError as e:
+            logger.error(f"❌ Failed to discover agent: {e}")
+            raise AgentError(f"Agent discovery failed: {e}") from e
+        except Exception as e:
+            logger.error(f"❌ Unexpected error during discovery: {e}")
+            raise AgentError(f"Unexpected discovery error: {e}") from e
+
     def run(self) -> None:
         """Run main agent event loop.
 

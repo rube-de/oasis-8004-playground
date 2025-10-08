@@ -14,16 +14,23 @@ services:
     env_file:
       - agent-client/.env
 
-    # Expose API server port (8000 for client)
+    # Expose API server port (map internal 80 to host 8000)
     ports:
-      - "8000:8000"
+      - "8000:80"
+
+    # Docker network configuration
+    networks:
+      erc8004-network:
+        aliases:
+          - agent.localhost
+          - agent-client
 
     # Restart policy for long-running container
     restart: unless-stopped
 
-    # Health check configuration (HTTP-based via API server)
+    # Health check configuration (HTTP-based via API server on port 80)
     healthcheck:
-      test: ["CMD", "uv", "run", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: ["CMD", "uv", "run", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:80/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -48,16 +55,23 @@ services:
     env_file:
       - agent-server/.env
 
-    # Expose API server port (8001 for server)
+    # Expose API server port (map internal 80 to host 8001)
     ports:
-      - "8001:8001"
+      - "8001:80"
+
+    # Docker network configuration
+    networks:
+      erc8004-network:
+        aliases:
+          - server.localhost
+          - agent-server
 
     # Restart policy for long-running container
     restart: unless-stopped
 
-    # Health check configuration (HTTP-based via API server)
+    # Health check configuration (HTTP-based via API server on port 80)
     healthcheck:
-      test: ["CMD", "uv", "run", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      test: ["CMD", "uv", "run", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:80/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -69,3 +83,8 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+# Define shared network for agent communication
+networks:
+  erc8004-network:
+    driver: bridge

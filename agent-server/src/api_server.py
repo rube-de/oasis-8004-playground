@@ -235,12 +235,12 @@ def create_app() -> FastAPI:
     return app
 
 
-def run_server(host: str = "0.0.0.0", port: int = 8001) -> None:
+def run_server(host: str = "0.0.0.0", port: int = 80) -> None:
     """Run the FastAPI server with uvicorn.
 
     Args:
         host: Host to bind to (default: 0.0.0.0 for container)
-        port: Port to bind to (default: 8001 for server)
+        port: Port to bind to (default: 80 for Docker)
     """
     app = create_app()
 

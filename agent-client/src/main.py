@@ -5,6 +5,7 @@ and long-running agent operations. Provides proper error handling and
 graceful shutdown.
 """
 
+import asyncio
 import logging
 import sys
 from pathlib import Path
@@ -160,6 +161,15 @@ def main() -> NoReturn:
             display_startup_success(agent)
         else:
             raise AgentError("Registration failed: no agent ID returned")
+
+        # Optional: Discover agent-server if configured
+        if config.agent_server_address:
+            logger.info("Agent server address configured, initiating discovery...")
+            try:
+                asyncio.run(agent.discover_server_agent(config.agent_server_address))
+            except AgentError as e:
+                logger.warning(f"Agent discovery failed (non-fatal): {e}")
+                logger.info("Continuing with normal operations...")
 
         # Run main event loop
         logger.info("Starting main event loop...")
