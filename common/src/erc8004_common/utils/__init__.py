@@ -18,6 +18,12 @@ from .agent_discovery import (
     AgentCardFetchError,
     AgentCardParseError,
 )
+from .rofl_attestation import (
+    verify_rofl_attestation,
+    get_rofl_metadata,
+    ROFLAttestationError,
+    AttestationVerificationError,
+)
 
 __all__ = [
     "ABILoadError",
@@ -31,4 +37,8 @@ __all__ = [
     "AgentNotFoundError",
     "AgentCardFetchError",
     "AgentCardParseError",
+    "verify_rofl_attestation",
+    "get_rofl_metadata",
+    "ROFLAttestationError",
+    "AttestationVerificationError",
 ]

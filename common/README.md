@@ -24,7 +24,16 @@ This package provides reusable infrastructure for building ERC-8004 compliant ag
   - ABI loading from Hardhat artifacts
   - Transaction signing middleware
   - Contract instance creation
-- Utility exceptions: `ContractUtilityError`, `ABILoadError`, `ConnectionError`
+- `verify_rofl_attestation(agent_address)`: Verify ROFL TEE attestation (**MOCK**)
+  - Validates agent has valid TEE attestation from Oasis ROFL
+  - Future: Query Sapphire network metadata for attestation verification
+- `get_rofl_metadata(agent_address)`: Get ROFL metadata for agent (**MOCK**)
+  - Future: Retrieve attestation quote, signature chain, enclave measurements
+- Agent Discovery:
+  - `discover_agent()`: Resolve address → domain → AgentCard
+  - `fetch_agent_card()`: Fetch AgentCard from RFC 8615 endpoint
+  - `parse_agent_card()`: Parse and validate AgentCard JSON
+- Utility exceptions: `ContractUtilityError`, `ABILoadError`, `ConnectionError`, `ROFLAttestationError`, `AgentDiscoveryError`
 
 ### Configuration (`erc8004_common.config`)
 
@@ -71,6 +80,29 @@ plugin = IdentityRegistryPlugin(utility, config)
 plugin.initialize()
 # Query operations (no private key needed)
 agent = plugin.get_agent(agent_id)
+```
+
+### ROFL Attestation Verification
+
+**Note**: Current implementation is a mock. Future versions will query Oasis Sapphire network.
+
+```python
+from erc8004_common.utils import verify_rofl_attestation
+
+# Verify agent has valid ROFL TEE attestation
+agent_address = "0x1234567890abcdef1234567890abcdef12345678"
+is_valid = await verify_rofl_attestation(agent_address)
+
+if is_valid:
+    print("✅ Agent has valid ROFL attestation")
+else:
+    print("❌ Agent does not have valid attestation")
+```
+
+**Mock Configuration**:
+```bash
+# Optional: Configure mock to only validate specific addresses
+export MOCK_VALID_ROFL_ADDRESSES="0xabc...,0xdef..."
 ```
 
 ## Installation
