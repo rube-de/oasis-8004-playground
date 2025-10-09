@@ -7,7 +7,7 @@ with proper CORS support for cross-origin agent discovery.
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar, Generic, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 import uvicorn
 
 from .skills.price_fetcher import get_price, PriceFetchError, InvalidSymbolError, NetworkError, RateLimitError
+from erc8004_common.utils import Web3Utility
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,61 @@ logger = logging.getLogger(__name__)
 # AgentCard file path
 AGENT_CARD_PATH = Path("/app/data/agent-card.json")
 AGENT_STATE_PATH = Path("/app/data/agent_state.json")
+
+
+# Generic signed response model
+DataT = TypeVar('DataT')
+
+
+class SignedResponse(BaseModel, Generic[DataT]):
+    """Generic signed response wrapper for all skills.
+
+    This standard envelope enables trustless verification for any skill.
+    All skills return data in this format to support cryptographic verification.
+
+    Attributes:
+        data: Skill-specific payload
+        signature: EIP-191 signature (hex string)
+        signer: Ethereum address that signed the data
+    """
+    data: DataT
+    signature: str = Field(..., description="EIP-191 signature (hex)")
+    signer: str = Field(..., description="Ethereum address of signer")
+
+
+def sign_response_data(web3_utility: Optional[Web3Utility], data: dict) -> dict:
+    """Sign skill response data and return signed envelope.
+
+    Generic signing utility for all skill endpoints. Takes any data dict
+    and returns the standard signed envelope format.
+
+    Args:
+        web3_utility: Web3Utility instance with signing account
+        data: Skill-specific data to sign
+
+    Returns:
+        Signed envelope: {"data": {...}, "signature": "0x...", "signer": "0x..."}
+
+    Raises:
+        ValueError: If web3_utility is None or has no signing account
+
+    Example:
+        >>> price_data = {"symbol": "BTCUSDT", "price": 45000.50, "timestamp": "..."}
+        >>> signed = sign_response_data(web3_utility, price_data)
+        >>> # Returns: {"data": price_data, "signature": "0x...", "signer": "0x..."}
+    """
+    if not web3_utility:
+        raise ValueError("Web3Utility required for signing responses")
+
+    if not web3_utility.account:
+        raise ValueError(
+            "Web3Utility has no signing account configured. "
+            "Ensure private_key is set in configuration."
+        )
+
+    # Sign data using Web3Utility
+    signed = web3_utility.sign_data(data)
+    return signed
 
 
 # Request/Response models
@@ -35,15 +91,18 @@ class PriceRequest(BaseModel):
     )
 
 
-class PriceResponse(BaseModel):
-    """Response model for price data."""
+class PriceData(BaseModel):
+    """Price data payload (skill-specific)."""
     symbol: str = Field(..., description="Normalized symbol in Binance format")
     price: float = Field(..., description="Current price")
     timestamp: str = Field(..., description="UTC timestamp of the price")
 
 
-def create_app() -> FastAPI:
+def create_app(web3_utility: Optional[Web3Utility] = None) -> FastAPI:
     """Create and configure FastAPI application.
+
+    Args:
+        web3_utility: Web3Utility for signing responses (optional for read-only mode)
 
     Returns:
         Configured FastAPI app instance
@@ -55,6 +114,9 @@ def create_app() -> FastAPI:
         docs_url="/api/docs",
         redoc_url="/api/redoc",
     )
+
+    # Store web3_utility for endpoint access
+    app.state.web3_utility = web3_utility
 
     # CORS middleware for agent discovery and skills
     app.add_middleware(
@@ -171,25 +233,37 @@ def create_app() -> FastAPI:
     @app.post(
         "/api/v1/skills/price",
         tags=["Skills"],
-        summary="Get cryptocurrency price",
-        description="Fetch real-time cryptocurrency price from Binance",
-        response_model=PriceResponse,
+        summary="Get cryptocurrency price (signed)",
+        description="Fetch real-time cryptocurrency price with cryptographic signature",
+        response_model=SignedResponse[PriceData],
     )
-    async def get_crypto_price(request: PriceRequest) -> PriceResponse:
-        """Fetch cryptocurrency price from Binance API.
+    async def get_crypto_price(request: PriceRequest) -> SignedResponse[PriceData]:
+        """Fetch cryptocurrency price from Binance API with trustless verification.
+
+        Returns signed price data that can be verified by clients:
+        - Cryptographic signature (EIP-191)
+        - Server's Ethereum address
+        - Price payload
 
         Args:
             request: Price request with symbol
 
         Returns:
-            Price response with current price and timestamp
+            Signed price response with signature and signer
 
         Raises:
             HTTPException: 400 for invalid symbol, 429 for rate limit, 503 for network errors
         """
         try:
+            # 1. Fetch price from Binance (skill-specific logic)
             price_data = await get_price(request.symbol)
-            return PriceResponse(**price_data)
+
+            # 2. Sign using generic wrapper
+            web3_utility = app.state.web3_utility
+            signed = sign_response_data(web3_utility, price_data)
+
+            # 3. Return signed envelope
+            return SignedResponse[PriceData](**signed)
 
         except InvalidSymbolError as e:
             logger.warning(f"Invalid symbol requested: {request.symbol}")
@@ -202,6 +276,14 @@ def create_app() -> FastAPI:
         except NetworkError as e:
             logger.error(f"Network error fetching price: {e}")
             raise HTTPException(status_code=503, detail=str(e))
+
+        except ValueError as e:
+            # Signing errors (no web3_utility or account)
+            logger.error(f"Signing error: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail="Server signing configuration error"
+            )
 
         except PriceFetchError as e:
             logger.error(f"Unexpected error fetching price: {e}")
@@ -235,16 +317,25 @@ def create_app() -> FastAPI:
     return app
 
 
-def run_server(host: str = "0.0.0.0", port: int = 80) -> None:
+def run_server(
+    host: str = "0.0.0.0",
+    port: int = 80,
+    web3_utility: Optional[Web3Utility] = None
+) -> None:
     """Run the FastAPI server with uvicorn.
 
     Args:
         host: Host to bind to (default: 0.0.0.0 for container)
         port: Port to bind to (default: 80 for Docker)
+        web3_utility: Web3Utility for signing responses (required for skills)
     """
-    app = create_app()
+    app = create_app(web3_utility)
 
     logger.info(f"Starting API server on {host}:{port}")
+    if web3_utility and web3_utility.account:
+        logger.info(f"API signing enabled with account: {web3_utility.account.address}")
+    else:
+        logger.warning("API signing disabled - web3_utility not provided")
 
     uvicorn.run(
         app,

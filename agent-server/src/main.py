@@ -58,8 +58,8 @@ def display_startup_success(agent: Agent) -> None:
     print(f"  Agent ID:      {agent.agent_id}")
     if agent.config:
         print(f"  Domain:        {agent.config.agent_domain}")
-    if agent.contract_utility and agent.contract_utility.account:
-        print(f"  Address:       {agent.contract_utility.account.address}")
+    if agent.web3_utility and agent.web3_utility.account:
+        print(f"  Address:       {agent.web3_utility.account.address}")
     print("=" * 60)
     print()
 

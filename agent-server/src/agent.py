@@ -69,7 +69,7 @@ class Agent:
         signal.signal(signal.SIGINT, self._handle_shutdown_signal)
 
     def initialize(self) -> None:
-        """Initialize agent components: config, contract utility, plugins.
+        """Initialize agent components: config, Web3 utility, plugins.
 
         Raises:
             AgentError: If initialization fails
@@ -87,18 +87,18 @@ class Agent:
             )
 
             # Initialize Web3Utility
-            logger.info("Initializing contract utility")
+            logger.info("Initializing Web3 utility")
             self.web3_utility = Web3Utility(self.config)
             if self.web3_utility.account:
                 logger.info(
-                    f"Contract utility initialized for account: "
+                    f"Web3 utility initialized for account: "
                     f"{self.web3_utility.account.address}"
                 )
 
             # Initialize Identity Registry plugin
             logger.info("Loading Identity Registry plugin")
             self.identity_plugin = IdentityRegistryPlugin(
-                contract_utility=self.web3_utility,
+                web3_utility=self.web3_utility,
                 config=self.config
             )
             self.identity_plugin.initialize()
@@ -110,7 +110,7 @@ class Agent:
             logger.info("Agent initialization complete")
 
         except Web3UtilityError as e:
-            raise AgentError(f"Contract utility initialization failed: {e}") from e
+            raise AgentError(f"Web3 utility initialization failed: {e}") from e
         except PluginInitializationError as e:
             raise AgentError(f"Plugin initialization failed: {e}") from e
         except Exception as e:
@@ -256,7 +256,7 @@ class Agent:
                 logger.debug("Cleaning up Identity Registry plugin")
 
             if self.web3_utility:
-                logger.debug("Cleaning up contract utility")
+                logger.debug("Cleaning up Web3 utility")
 
             logger.info("✓ Agent shutdown complete")
 
@@ -280,23 +280,23 @@ class Agent:
             "loaded": self.config is not None
         }
 
-        # Check contract utility
+        # Check Web3 utility
         if self.web3_utility:
             try:
                 connected = self.web3_utility.w3.is_connected()
-                health["components"]["contract_utility"] = {
+                health["components"]["web3_utility"] = {
                     "status": "ok" if connected else "error",
                     "connected": connected,
                     "chain_id": self.web3_utility.w3.eth.chain_id if connected else None
                 }
             except Exception as e:
-                health["components"]["contract_utility"] = {
+                health["components"]["web3_utility"] = {
                     "status": "error",
                     "error": str(e)
                 }
                 health["healthy"] = False
         else:
-            health["components"]["contract_utility"] = {
+            health["components"]["web3_utility"] = {
                 "status": "error",
                 "loaded": False
             }
@@ -348,7 +348,7 @@ class Agent:
             raise AgentError("Cannot generate AgentCard: config not loaded")
 
         if not self.web3_utility or not self.web3_utility.account:
-            raise AgentError("Cannot generate AgentCard: contract utility not initialized")
+            raise AgentError("Cannot generate AgentCard: Web3 utility not initialized")
 
         try:
             # Get chain ID from Web3 connection
@@ -401,10 +401,10 @@ class Agent:
 
             logger.info(f"Starting API server on port {port}")
 
-            # Create thread for API server
+            # Create thread for API server (pass web3_utility for signing)
             self.api_server_thread = threading.Thread(
                 target=api_server.run_server,
-                args=("0.0.0.0", port),
+                args=("0.0.0.0", port, self.web3_utility),
                 daemon=True,
                 name="api-server"
             )

@@ -10,9 +10,6 @@ from .web3_utility import (
     Web3Utility,
     Web3UtilityError,
 )
-# Backward compatibility aliases
-ContractUtility = Web3Utility
-ContractUtilityError = Web3UtilityError
 from .agent_discovery import (
     discover_agent,
     fetch_agent_card,
@@ -35,8 +32,6 @@ __all__ = [
     "SigningError",
     "Web3Utility",
     "Web3UtilityError",
-    "ContractUtility",  # Backward compatibility
-    "ContractUtilityError",  # Backward compatibility
     "discover_agent",
     "fetch_agent_card",
     "parse_agent_card",

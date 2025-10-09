@@ -253,7 +253,7 @@ async def discover_agent(
         AgentCardParseError: If AgentCard parsing fails
 
     Example:
-        >>> plugin = IdentityRegistryPlugin(contract_utility, config)
+        >>> plugin = IdentityRegistryPlugin(web3_utility, config)
         >>> plugin.initialize()
         >>> card = await discover_agent("0x123...", plugin)
         >>> print(card.name)

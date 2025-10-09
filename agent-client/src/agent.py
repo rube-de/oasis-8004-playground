@@ -14,6 +14,7 @@ from typing import Optional, Dict, Any
 
 from .config import Config
 from . import api_server
+from .skills import call_verified_skill, get_verified_price, VerifiedCallError
 from erc8004_common.utils.agent_card import generate_agent_card
 from erc8004_common.utils import Web3Utility, Web3UtilityError
 from erc8004_common.plugins.identity_registry import IdentityRegistryPlugin
@@ -69,7 +70,7 @@ class Agent:
         signal.signal(signal.SIGINT, self._handle_shutdown_signal)
 
     def initialize(self) -> None:
-        """Initialize agent components: config, contract utility, plugins.
+        """Initialize agent components: config, Web3 utility, plugins.
 
         Raises:
             AgentError: If initialization fails
@@ -91,14 +92,14 @@ class Agent:
             self.web3_utility = Web3Utility(self.config)
             if self.web3_utility.account:
                 logger.info(
-                    f"Contract utility initialized for account: "
+                    f"Web3 utility initialized for account: "
                     f"{self.web3_utility.account.address}"
                 )
 
             # Initialize Identity Registry plugin
             logger.info("Loading Identity Registry plugin")
             self.identity_plugin = IdentityRegistryPlugin(
-                contract_utility=self.web3_utility,
+                web3_utility=self.web3_utility,
                 config=self.config
             )
             self.identity_plugin.initialize()
@@ -110,7 +111,7 @@ class Agent:
             logger.info("Agent initialization complete")
 
         except Web3UtilityError as e:
-            raise AgentError(f"Contract utility initialization failed: {e}") from e
+            raise AgentError(f"Web3 utility initialization failed: {e}") from e
         except PluginInitializationError as e:
             raise AgentError(f"Plugin initialization failed: {e}") from e
         except Exception as e:
@@ -276,6 +277,146 @@ class Agent:
             logger.error(f"❌ Unexpected error during discovery: {e}")
             raise AgentError(f"Unexpected discovery error: {e}") from e
 
+    async def call_skill(
+        self,
+        server_address: str,
+        endpoint: str,
+        method: str = "POST",
+        json_data: Optional[dict] = None,
+        timeout: int = 10,
+    ) -> dict:
+        """Call any ROFL server skill with full trustless verification.
+
+        Generic method for calling any skill endpoint on a ROFL-based agent server.
+        Performs complete verification chain:
+        1. Server discovery via identity registry
+        2. HTTP endpoint call
+        3. Cryptographic signature verification (EIP-191)
+        4. Signer identity verification against registry
+        5. ROFL TEE attestation verification
+
+        Args:
+            server_address: Server's Ethereum address (from identity registry)
+            endpoint: Skill endpoint path (e.g., "/skills/price")
+            method: HTTP method (default: POST)
+            json_data: Request payload (optional)
+            timeout: Request timeout in seconds (default: 10)
+
+        Returns:
+            Verified data payload from server
+
+        Raises:
+            AgentError: If agent not initialized or verification fails
+
+        Example:
+            >>> # Call price skill
+            >>> price_data = await agent.call_skill(
+            ...     "0xSERVER",
+            ...     "/skills/price",
+            ...     json_data={"symbol": "BTC-USD"}
+            ... )
+            >>> print(f"Price: ${price_data['price']}")
+
+            >>> # Call any custom skill
+            >>> result = await agent.call_skill(
+            ...     "0xSERVER",
+            ...     "/skills/custom",
+            ...     json_data={"query": "analyze"}
+            ... )
+
+        Security:
+            All responses verified through cryptographic signature,
+            identity registry authorization, and ROFL TEE attestation.
+            Only returns data if ALL verification checks pass.
+        """
+        if not self.identity_plugin or not self.web3_utility:
+            raise AgentError("Agent not initialized. Call initialize() first.")
+
+        logger.info(f"🔐 Calling verified skill: {server_address}{endpoint}")
+
+        try:
+            result = await call_verified_skill(
+                server_address=server_address,
+                endpoint=endpoint,
+                identity_plugin=self.identity_plugin,
+                web3_utility=self.web3_utility,
+                method=method,
+                json_data=json_data,
+                timeout=timeout,
+            )
+
+            logger.info(f"✅ Skill call successful")
+            return result
+
+        except VerifiedCallError as e:
+            logger.error(f"❌ Verified skill call failed: {e}")
+            raise AgentError(f"Skill call failed: {e}") from e
+        except Exception as e:
+            logger.error(f"❌ Unexpected error calling skill: {e}")
+            raise AgentError(f"Unexpected skill error: {e}") from e
+
+    async def get_price(
+        self,
+        server_address: str,
+        symbol: str,
+    ) -> dict:
+        """Get verified cryptocurrency price from ROFL server.
+
+        Convenience wrapper around call_skill() specifically for the price endpoint.
+        Provides full trustless verification of price data.
+
+        Args:
+            server_address: Server's Ethereum address (from identity registry)
+            symbol: Trading pair symbol (e.g., "BTC-USD", "ETH-USD")
+
+        Returns:
+            Verified price data:
+            {
+                "symbol": "BTCUSDT",
+                "price": 45000.50,
+                "timestamp": "2025-10-09T12:34:56.789Z"
+            }
+
+        Raises:
+            AgentError: If agent not initialized or verification fails
+
+        Example:
+            >>> price_data = await agent.get_price("0x123...", "BTC-USD")
+            >>> print(f"BTC Price: ${price_data['price']:,.2f}")
+            BTC Price: $45,000.50
+
+        Security:
+            Complete trustless verification:
+            - Server discovery via identity registry
+            - Cryptographic signature verification (EIP-191)
+            - Signer identity verification
+            - ROFL TEE attestation check
+        """
+        if not self.identity_plugin or not self.web3_utility:
+            raise AgentError("Agent not initialized. Call initialize() first.")
+
+        logger.info(f"📊 Getting verified price for {symbol} from {server_address}")
+
+        try:
+            result = await get_verified_price(
+                server_address=server_address,
+                symbol=symbol,
+                identity_plugin=self.identity_plugin,
+                web3_utility=self.web3_utility,
+            )
+
+            logger.info(
+                f"✅ Price retrieved: {result['symbol']} = ${result['price']:,.2f}"
+            )
+            return result
+
+        except VerifiedCallError as e:
+            logger.error(f"❌ Price fetch failed: {e}")
+            raise AgentError(f"Price fetch failed: {e}") from e
+        except Exception as e:
+            logger.error(f"❌ Unexpected error fetching price: {e}")
+            raise AgentError(f"Unexpected price error: {e}") from e
+
     def run(self) -> None:
         """Run main agent event loop.
 
@@ -332,7 +473,7 @@ class Agent:
                 logger.debug("Cleaning up Identity Registry plugin")
 
             if self.web3_utility:
-                logger.debug("Cleaning up contract utility")
+                logger.debug("Cleaning up Web3 utility")
 
             logger.info("✓ Agent shutdown complete")
 
@@ -356,23 +497,23 @@ class Agent:
             "loaded": self.config is not None
         }
 
-        # Check contract utility
+        # Check Web3 utility
         if self.web3_utility:
             try:
                 connected = self.web3_utility.w3.is_connected()
-                health["components"]["contract_utility"] = {
+                health["components"]["web3_utility"] = {
                     "status": "ok" if connected else "error",
                     "connected": connected,
                     "chain_id": self.web3_utility.w3.eth.chain_id if connected else None
                 }
             except Exception as e:
-                health["components"]["contract_utility"] = {
+                health["components"]["web3_utility"] = {
                     "status": "error",
                     "error": str(e)
                 }
                 health["healthy"] = False
         else:
-            health["components"]["contract_utility"] = {
+            health["components"]["web3_utility"] = {
                 "status": "error",
                 "loaded": False
             }
@@ -424,7 +565,7 @@ class Agent:
             raise AgentError("Cannot generate AgentCard: config not loaded")
 
         if not self.web3_utility or not self.web3_utility.account:
-            raise AgentError("Cannot generate AgentCard: contract utility not initialized")
+            raise AgentError("Cannot generate AgentCard: Web3 utility not initialized")
 
         try:
             # Get chain ID from Web3 connection

@@ -40,9 +40,9 @@ class BaseRegistryPlugin(ABC):
     Each plugin defines its own operation methods (e.g., register(), submit_feedback()).
     """
 
-    def __init__(self, contract_utility: Any, config: Any):
-        """Initialize plugin with ContractUtility and Config."""
-        self.contract_utility = contract_utility
+    def __init__(self, web3_utility: Any, config: Any):
+        """Initialize plugin with Web3Utility and Config."""
+        self.web3_utility = web3_utility
         self.config = config
         self._contract: Optional[Contract] = None
         self._initialized = False

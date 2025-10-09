@@ -38,7 +38,7 @@ class IdentityRegistryPlugin(BaseRegistryPlugin):
         """Load Identity Registry contract."""
         try:
             logger.info(f"Initializing {self.name} at {self.contract_address}")
-            self._contract = self.contract_utility.get_contract(
+            self._contract = self.web3_utility.get_contract(
                 contract_name="IdentityRegistry",
                 address=self.contract_address,
             )
@@ -59,7 +59,7 @@ class IdentityRegistryPlugin(BaseRegistryPlugin):
         self._ensure_initialized()
 
         agent_domain = self.config.agent_domain
-        agent_address = self.contract_utility.account.address
+        agent_address = self.web3_utility.account.address
 
         logger.info(f"Registering agent: domain={agent_domain}, address={agent_address}")
 
@@ -106,7 +106,7 @@ class IdentityRegistryPlugin(BaseRegistryPlugin):
             # Send transaction - Web3 middleware will add "from" automatically
             tx_hash = self.contract.functions.newAgent(agent_domain, agent_address).transact({
                 "gas": 300000,
-                "gasPrice": self.contract_utility.w3.eth.gas_price,
+                "gasPrice": self.web3_utility.w3.eth.gas_price,
             })
             logger.debug(f"Transaction submitted: {tx_hash.hex()}")
 
@@ -138,7 +138,7 @@ class IdentityRegistryPlugin(BaseRegistryPlugin):
         try:
             # Wait for transaction receipt
             logger.debug(f"Waiting for transaction confirmation (timeout: {self.config.tx_timeout}s)")
-            receipt = self.contract_utility.w3.eth.wait_for_transaction_receipt(
+            receipt = self.web3_utility.w3.eth.wait_for_transaction_receipt(
                 tx_hash, timeout=self.config.tx_timeout
             )
 
@@ -213,7 +213,7 @@ class IdentityRegistryPlugin(BaseRegistryPlugin):
         self._ensure_initialized()
 
         try:
-            checksum_address = self.contract_utility.w3.to_checksum_address(address)
+            checksum_address = self.web3_utility.w3.to_checksum_address(address)
             result = self.contract.functions.resolveByAddress(checksum_address).call()
 
             return {

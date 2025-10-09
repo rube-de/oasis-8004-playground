@@ -376,7 +376,7 @@ def generate_agent_card(
         name=name,
         description=description,
         version=version,
-        url=f"https://{agent_domain}/api/v1",
+        url=f"http://{agent_domain}/api/v1",
         preferredTransport="JSONRPC",
         capabilities=capabilities,
         skills=skills,

@@ -93,7 +93,7 @@ docker-compose down
 ```
 INFO - Starting ERC-8004 Agent Server
 INFO - Loading configuration from environment
-INFO - Initializing ContractUtility with RPC: http://localhost:8545
+INFO - Initializing Web3 utility
 INFO - Loading IdentityRegistryPlugin
 INFO - Checking existing registration state...
 INFO - No existing registration found. Proceeding with registration.
@@ -162,7 +162,7 @@ src/
 
 ### Key Components
 
-- **ContractUtility**: Abstraction for Web3 contract interactions, ABI loading (from common package)
+- **Web3Utility**: Abstraction for Web3 contract interactions, ABI loading, message signing (from common package)
 - **Plugin System**: Modular registry integrations (Identity, Reputation, Validation)
 - **Agent**: Orchestrates registration, lifecycle, state persistence
 - **Config**: Type-safe Pydantic configuration with validation

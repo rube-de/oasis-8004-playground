@@ -59,8 +59,8 @@ def display_startup_success(agent: Agent) -> None:
     print(f"  Agent ID:      {agent.agent_id}")
     if agent.config:
         print(f"  Domain:        {agent.config.agent_domain}")
-    if agent.contract_utility and agent.contract_utility.account:
-        print(f"  Address:       {agent.contract_utility.account.address}")
+    if agent.web3_utility and agent.web3_utility.account:
+        print(f"  Address:       {agent.web3_utility.account.address}")
     print("=" * 60)
     print()
 
@@ -113,6 +113,71 @@ def display_error(error: Exception, context: str = "") -> None:
     print()
 
 
+async def test_skills(agent: Agent, server_address: str) -> None:
+    """Test skill verification with ROFL server.
+
+    Demonstrates trustless skill calling with complete verification chain:
+    - Generic skill call (call_skill)
+    - Convenience wrapper (get_price)
+
+    Args:
+        agent: Initialized agent instance
+        server_address: Server's Ethereum address to test with
+
+    Raises:
+        AgentError: If skill tests fail
+    """
+    logger = logging.getLogger(__name__)
+
+    logger.info("=" * 60)
+    logger.info("Testing trustless skill verification...")
+    logger.info("=" * 60)
+
+    try:
+        # Test 1: Get price using convenience method
+        logger.info("\n📊 Test 1: Get verified price (BTC-USD)")
+        logger.info("-" * 60)
+
+        price_data = await agent.get_price(
+            server_address=server_address,
+            symbol="BTC-USD"
+        )
+
+        logger.info(f"✅ Price verification successful!")
+        logger.info(f"   Symbol: {price_data['symbol']}")
+        logger.info(f"   Price: ${price_data['price']:,.2f}")
+        logger.info(f"   Timestamp: {price_data['timestamp']}")
+
+        # Test 2: Call price skill using generic method
+        logger.info("\n🔐 Test 2: Generic skill call (ETH-USD)")
+        logger.info("-" * 60)
+
+        eth_data = await agent.call_skill(
+            server_address=server_address,
+            endpoint="/skills/price",
+            method="POST",
+            json_data={"symbol": "ETH-USD"}
+        )
+
+        logger.info(f"✅ Generic skill call successful!")
+        logger.info(f"   Symbol: {eth_data['symbol']}")
+        logger.info(f"   Price: ${eth_data['price']:,.2f}")
+        logger.info(f"   Timestamp: {eth_data['timestamp']}")
+
+        logger.info("\n" + "=" * 60)
+        logger.info("✅ All skill tests passed!")
+        logger.info("=" * 60 + "\n")
+
+    except AgentError as e:
+        logger.error(f"\n❌ Skill test failed: {e}")
+        logger.info("\nNote: Skill tests require:")
+        logger.info("  • Agent server running and registered")
+        logger.info("  • Valid AGENT_SERVER_ADDRESS in .env")
+        logger.info("  • Server implements /skills/price endpoint")
+        logger.info("  • Server has ROFL attestation")
+        raise
+
+
 def main() -> NoReturn:
     """Main application entry point.
 
@@ -162,13 +227,21 @@ def main() -> NoReturn:
         else:
             raise AgentError("Registration failed: no agent ID returned")
 
-        # Optional: Discover agent-server if configured
+        # Optional: Discover agent-server and test skills if configured
         if config.agent_server_address:
             logger.info("Agent server address configured, initiating discovery...")
             try:
                 asyncio.run(agent.discover_server_agent(config.agent_server_address))
             except AgentError as e:
                 logger.warning(f"Agent discovery failed (non-fatal): {e}")
+                logger.info("Continuing with normal operations...")
+
+            # Test skills after discovery
+            logger.info("Testing verified skill calls...")
+            try:
+                asyncio.run(test_skills(agent, config.agent_server_address))
+            except AgentError as e:
+                logger.warning(f"Skill tests failed (non-fatal): {e}")
                 logger.info("Continuing with normal operations...")
 
         # Run main event loop
