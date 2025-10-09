@@ -1,225 +1,181 @@
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
+// SPDX-License-Identifier: CC0-1.0
+pragma solidity ^0.8.20;
 
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./interfaces/IIdentityRegistry.sol";
 
 /**
  * @title IdentityRegistry
- * @dev Implementation of the Identity Registry for ERC-8004 Trustless Agents
- * @notice Central registry for all agent identities with spam protection
+ * @dev ERC-8004 v1.0 Identity Registry - Reference Implementation
+ * @notice ERC-721 based agent registry with metadata storage
+ *
+ * This contract implements the Identity Registry as specified in ERC-8004 v1.0.
+ * Each agent is represented as an ERC-721 NFT, making agents immediately browsable
+ * and transferable with NFT-compliant applications.
+ *
+ * Key Features:
+ * - ERC-721 compliance with URIStorage extension
+ * - Flexible registration with optional metadata
+ * - On-chain key-value metadata storage
+ * - Transferable agent ownership
+ *
  * @author ChaosChain Labs
  */
-contract IdentityRegistry is IIdentityRegistry {
-    // ============ Constants ============
-    
-    /// @dev Contract version for tracking implementation changes
-    string public constant VERSION = "1.0.0";
-
+contract IdentityRegistry is ERC721URIStorage, ReentrancyGuard, IIdentityRegistry {
     // ============ State Variables ============
-    
-    /// @dev Counter for agent IDs
+
+    /// @dev Counter for agent IDs (tokenIds)
     uint256 private _agentIdCounter;
-    
-    /// @dev Mapping from agent ID to agent info
-    mapping(uint256 => AgentInfo) private _agents;
-    
-    /// @dev Mapping from domain to agent ID
-    mapping(string => uint256) private _domainToAgentId;
-    
-    /// @dev Mapping from address to agent ID
-    mapping(address => uint256) private _addressToAgentId;
+
+    /// @dev Mapping from agentId to metadata key to metadata value
+    mapping(uint256 => mapping(string => bytes)) private _metadata;
 
     // ============ Constructor ============
-    
-    constructor() {
-        // Start agent IDs from 1 (0 is reserved for "not found")
+
+    /**
+     * @dev Initializes the ERC-721 contract with name and symbol
+     */
+    constructor() ERC721("ERC-8004 Trustless Agent", "AGENT") {
+        // Agent IDs start from 1 (0 is reserved for non-existent agents)
         _agentIdCounter = 1;
     }
 
-    // ============ Write Functions ============
-    
-    /**
-     * @inheritdoc IIdentityRegistry
-     */
-    function newAgent(
-        string calldata agentDomain, 
-        address agentAddress
-    ) external returns (uint256 agentId) {
-        // SECURITY: Only allow registration of own address to prevent impersonation
-        if (msg.sender != agentAddress) {
-            revert UnauthorizedRegistration();
-        }
-        
-        // Validate inputs
-        if (bytes(agentDomain).length == 0) {
-            revert InvalidDomain();
-        }
-        if (agentAddress == address(0)) {
-            revert InvalidAddress();
-        }
-        
-        // SECURITY: Normalize domain to lowercase to prevent case-variance bypass
-        string memory normalizedDomain = _toLowercase(agentDomain);
-        
-        // Check for duplicates using normalized domain
-        if (_domainToAgentId[normalizedDomain] != 0) {
-            revert DomainAlreadyRegistered();
-        }
-        if (_addressToAgentId[agentAddress] != 0) {
-            revert AddressAlreadyRegistered();
-        }
-        
-        // Assign new agent ID
-        agentId = _agentIdCounter++;
-        
-        // Store agent info with original domain (for display) but use normalized for lookups
-        _agents[agentId] = AgentInfo({
-            agentId: agentId,
-            agentDomain: agentDomain, // Store original case for display
-            agentAddress: agentAddress
-        });
-        
-        // Create lookup mappings using normalized domain
-        _domainToAgentId[normalizedDomain] = agentId;
-        _addressToAgentId[agentAddress] = agentId;
-        
+    // ============ Registration Functions ============
 
-        
-        emit AgentRegistered(agentId, agentDomain, agentAddress);
-    }
-    
     /**
-     * @inheritdoc IIdentityRegistry
+     * @notice Register a new agent with tokenURI and metadata
+     * @param tokenURI_ The URI pointing to the agent's registration JSON file
+     * @param metadata Array of metadata entries to set for the agent
+     * @return agentId The newly assigned agent ID
      */
-    function updateAgent(
+    function register(
+        string calldata tokenURI_,
+        MetadataEntry[] calldata metadata
+    ) external nonReentrant returns (uint256 agentId) {
+        agentId = _mintAgent(msg.sender, tokenURI_);
+
+        // Set metadata if provided
+        if (metadata.length > 0) {
+            _setMetadataBatch(agentId, metadata);
+        }
+    }
+
+    /**
+     * @notice Register a new agent with tokenURI only
+     * @param tokenURI_ The URI pointing to the agent's registration JSON file
+     * @return agentId The newly assigned agent ID
+     */
+    function register(string calldata tokenURI_) external nonReentrant returns (uint256 agentId) {
+        agentId = _mintAgent(msg.sender, tokenURI_);
+    }
+
+    /**
+     * @notice Register a new agent without tokenURI (can be set later)
+     * @dev The tokenURI can be set later using _setTokenURI() by the owner
+     * @return agentId The newly assigned agent ID
+     */
+    function register() external nonReentrant returns (uint256 agentId) {
+        agentId = _mintAgent(msg.sender, "");
+    }
+
+    // ============ Metadata Functions ============
+
+    /**
+     * @notice Set metadata for an agent
+     * @dev Only the owner or approved operator can set metadata
+     * @param agentId The agent ID
+     * @param key The metadata key
+     * @param value The metadata value as bytes
+     */
+    function setMetadata(
         uint256 agentId,
-        string calldata newAgentDomain,
-        address newAgentAddress
-    ) external returns (bool success) {
-        // Validate agent exists
-        AgentInfo storage agent = _agents[agentId];
-        if (agent.agentId == 0) {
-            revert AgentNotFound();
-        }
-        
-        // Check authorization
-        if (msg.sender != agent.agentAddress) {
-            revert UnauthorizedUpdate();
-        }
-        
-        bool domainChanged = bytes(newAgentDomain).length > 0;
-        bool addressChanged = newAgentAddress != address(0);
-        
-        // Validate new values if provided
-        if (domainChanged) {
-            // SECURITY: Normalize new domain for consistent checking
-            string memory normalizedNewDomain = _toLowercase(newAgentDomain);
-            if (_domainToAgentId[normalizedNewDomain] != 0) {
-                revert DomainAlreadyRegistered();
-            }
-        }
-        
-        if (addressChanged) {
-            if (_addressToAgentId[newAgentAddress] != 0) {
-                revert AddressAlreadyRegistered();
-            }
-        }
-        
-        // Update domain if provided
-        if (domainChanged) {
-            // SECURITY: Remove old domain mapping using normalized version
-            string memory oldNormalizedDomain = _toLowercase(agent.agentDomain);
-            delete _domainToAgentId[oldNormalizedDomain];
-            
-            // SECURITY: Add new domain mapping using normalized version
-            string memory normalizedNewDomain = _toLowercase(newAgentDomain);
-            agent.agentDomain = newAgentDomain; // Store original case for display
-            _domainToAgentId[normalizedNewDomain] = agentId;
-        }
-        
-        // Update address if provided
-        if (addressChanged) {
-            // Remove old address mapping
-            delete _addressToAgentId[agent.agentAddress];
-            // Set new address
-            agent.agentAddress = newAgentAddress;
-            _addressToAgentId[newAgentAddress] = agentId;
-        }
-        
-        emit AgentUpdated(agentId, agent.agentDomain, agent.agentAddress);
-        return true;
+        string calldata key,
+        bytes calldata value
+    ) external {
+        require(_isAuthorized(ownerOf(agentId), msg.sender, agentId), "Not authorized");
+        require(bytes(key).length > 0, "Empty key");
+
+        _metadata[agentId][key] = value;
+
+        emit MetadataSet(agentId, key, key, value);
     }
 
-    // ============ Read Functions ============
-    
     /**
-     * @inheritdoc IIdentityRegistry
+     * @notice Get metadata for an agent
+     * @param agentId The agent ID
+     * @param key The metadata key
+     * @return value The metadata value as bytes
      */
-    function getAgent(uint256 agentId) external view returns (AgentInfo memory agentInfo) {
-        agentInfo = _agents[agentId];
-        if (agentInfo.agentId == 0) {
-            revert AgentNotFound();
-        }
+    function getMetadata(
+        uint256 agentId,
+        string calldata key
+    ) external view returns (bytes memory value) {
+        require(_ownerOf(agentId) != address(0), "Agent does not exist");
+        return _metadata[agentId][key];
     }
-    
+
+    // ============ View Functions ============
+
     /**
-     * @inheritdoc IIdentityRegistry
+     * @notice Get the total number of registered agents
+     * @return count The total number of agents
      */
-    function resolveByDomain(string calldata agentDomain) external view returns (AgentInfo memory agentInfo) {
-        // SECURITY: Normalize domain for lookup to prevent case-variance bypass
-        string memory normalizedDomain = _toLowercase(agentDomain);
-        uint256 agentId = _domainToAgentId[normalizedDomain];
-        if (agentId == 0) {
-            revert AgentNotFound();
-        }
-        agentInfo = _agents[agentId];
+    function totalAgents() external view returns (uint256 count) {
+        return _agentIdCounter - 1;
     }
-    
+
     /**
-     * @inheritdoc IIdentityRegistry
-     */
-    function resolveByAddress(address agentAddress) external view returns (AgentInfo memory agentInfo) {
-        uint256 agentId = _addressToAgentId[agentAddress];
-        if (agentId == 0) {
-            revert AgentNotFound();
-        }
-        agentInfo = _agents[agentId];
-    }
-    
-    /**
-     * @inheritdoc IIdentityRegistry
-     */
-    function getAgentCount() external view returns (uint256 count) {
-        return _agentIdCounter - 1; // Subtract 1 because we start from 1
-    }
-    
-    /**
-     * @inheritdoc IIdentityRegistry
+     * @notice Check if an agent exists
+     * @param agentId The agent ID to check
+     * @return exists True if the agent exists
      */
     function agentExists(uint256 agentId) external view returns (bool exists) {
-        return _agents[agentId].agentId != 0;
+        return _ownerOf(agentId) != address(0);
     }
 
     // ============ Internal Functions ============
-    
+
     /**
-     * @dev Converts a string to lowercase to prevent case-variance bypass attacks
-     * @param str The input string to convert
-     * @return result The lowercase version of the input string
+     * @dev Mints a new agent NFT
+     * @param to The address to mint the agent to
+     * @param tokenURI_ The token URI
+     * @return agentId The newly minted agent ID
      */
-    function _toLowercase(string memory str) internal pure returns (string memory result) {
-        bytes memory strBytes = bytes(str);
-        bytes memory resultBytes = new bytes(strBytes.length);
-        
-        for (uint256 i = 0; i < strBytes.length; i++) {
-            // Convert A-Z to a-z
-            if (strBytes[i] >= 0x41 && strBytes[i] <= 0x5A) {
-                resultBytes[i] = bytes1(uint8(strBytes[i]) + 32);
-            } else {
-                resultBytes[i] = strBytes[i];
-            }
+    function _mintAgent(
+        address to,
+        string memory tokenURI_
+    ) internal returns (uint256 agentId) {
+        agentId = _agentIdCounter;
+        _agentIdCounter++;
+
+        _safeMint(to, agentId);
+
+        if (bytes(tokenURI_).length > 0) {
+            _setTokenURI(agentId, tokenURI_);
         }
-        
-        result = string(resultBytes);
+
+        emit Registered(agentId, tokenURI_, to);
+    }
+
+    /**
+     * @dev Sets multiple metadata entries in batch
+     * @param agentId The agent ID
+     * @param metadata Array of metadata entries
+     */
+    function _setMetadataBatch(
+        uint256 agentId,
+        MetadataEntry[] calldata metadata
+    ) internal {
+        for (uint256 i = 0; i < metadata.length; i++) {
+            require(bytes(metadata[i].key).length > 0, "Empty key");
+            _metadata[agentId][metadata[i].key] = metadata[i].value;
+            emit MetadataSet(
+                agentId,
+                metadata[i].key,
+                metadata[i].key,
+                metadata[i].value
+            );
+        }
     }
 }
