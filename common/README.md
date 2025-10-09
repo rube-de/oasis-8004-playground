@@ -20,10 +20,12 @@ This package provides reusable infrastructure for building ERC-8004 compliant ag
 
 ### Utilities (`erc8004_common.utils`)
 
-- `ContractUtility`: Web3 contract interaction layer
+- `Web3Utility`: Comprehensive Web3 operations layer
   - ABI loading from Hardhat artifacts
   - Transaction signing middleware
   - Contract instance creation
+  - Message signing and verification (EIP-191)
+  - Methods: `get_contract()`, `sign_data()`, `verify_signature()`
 - `verify_rofl_attestation(agent_address)`: Verify ROFL TEE attestation (**MOCK**)
   - Validates agent has valid TEE attestation from Oasis ROFL
   - Future: Query Sapphire network metadata for attestation verification
@@ -33,7 +35,7 @@ This package provides reusable infrastructure for building ERC-8004 compliant ag
   - `discover_agent()`: Resolve address → domain → AgentCard
   - `fetch_agent_card()`: Fetch AgentCard from RFC 8615 endpoint
   - `parse_agent_card()`: Parse and validate AgentCard JSON
-- Utility exceptions: `ContractUtilityError`, `ABILoadError`, `ConnectionError`, `ROFLAttestationError`, `AgentDiscoveryError`
+- Utility exceptions: `Web3UtilityError`, `ABILoadError`, `ConnectionError`, `SigningError`, `ROFLAttestationError`, `AgentDiscoveryError`
 
 ### Configuration (`erc8004_common.config`)
 
@@ -48,7 +50,7 @@ This package provides reusable infrastructure for building ERC-8004 compliant ag
 
 ```python
 from erc8004_common.config import BaseConfig
-from erc8004_common.utils import ContractUtility
+from erc8004_common.utils import Web3Utility
 from erc8004_common.plugins import IdentityRegistryPlugin
 
 class ClientConfig(BaseConfig):
@@ -57,7 +59,7 @@ class ClientConfig(BaseConfig):
     agent_domain: str
 
 config = ClientConfig()
-utility = ContractUtility(config)
+utility = Web3Utility(config)
 plugin = IdentityRegistryPlugin(utility, config)
 plugin.initialize()
 agent_id = plugin.register()
@@ -67,7 +69,7 @@ agent_id = plugin.register()
 
 ```python
 from erc8004_common.config import BaseConfig
-from erc8004_common.utils import ContractUtility
+from erc8004_common.utils import Web3Utility
 from erc8004_common.plugins import IdentityRegistryPlugin
 
 class ServerConfig(BaseConfig):
@@ -75,11 +77,38 @@ class ServerConfig(BaseConfig):
     server_port: int = 8080
 
 config = ServerConfig()
-utility = ContractUtility(config)
+utility = Web3Utility(config)
 plugin = IdentityRegistryPlugin(utility, config)
 plugin.initialize()
 # Query operations (no private key needed)
 agent = plugin.get_agent(agent_id)
+```
+
+### Message Signing and Verification
+
+Sign and verify data using EIP-191 (Ethereum Signed Message):
+
+```python
+from erc8004_common.utils import Web3Utility
+
+# Initialize with private key
+config = Config(private_key="0x...")
+utility = Web3Utility(config)
+
+# Sign data
+price_data = {"symbol": "BTC-USD", "price": 45000.50, "timestamp": "2025-10-09T12:00:00Z"}
+signed = utility.sign_data(price_data)
+
+# Returns: {"data": {...}, "signature": "0x...", "signer": "0x..."}
+print(f"Signed by: {signed['signer']}")
+print(f"Signature: {signed['signature']}")
+
+# Verify signature
+is_valid, recovered_address = utility.verify_signature(signed)
+if is_valid:
+    print(f"✅ Valid signature from {recovered_address}")
+else:
+    print("❌ Invalid signature")
 ```
 
 ### ROFL Attestation Verification

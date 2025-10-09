@@ -1,14 +1,18 @@
 """ERC-8004 Utilities
 
-Utility classes for Web3 contract interactions and common operations.
+Utility classes for Web3 operations and common functions.
 """
 
-from .contract_utility import (
+from .web3_utility import (
     ABILoadError,
     ConnectionError,
-    ContractUtility,
-    ContractUtilityError,
+    SigningError,
+    Web3Utility,
+    Web3UtilityError,
 )
+# Backward compatibility aliases
+ContractUtility = Web3Utility
+ContractUtilityError = Web3UtilityError
 from .agent_discovery import (
     discover_agent,
     fetch_agent_card,
@@ -28,8 +32,11 @@ from .rofl_attestation import (
 __all__ = [
     "ABILoadError",
     "ConnectionError",
-    "ContractUtility",
-    "ContractUtilityError",
+    "SigningError",
+    "Web3Utility",
+    "Web3UtilityError",
+    "ContractUtility",  # Backward compatibility
+    "ContractUtilityError",  # Backward compatibility
     "discover_agent",
     "fetch_agent_card",
     "parse_agent_card",

@@ -15,7 +15,7 @@ from typing import Optional, Dict, Any
 from .config import Config
 from . import api_server
 from erc8004_common.utils.agent_card import generate_agent_card
-from erc8004_common.utils.contract_utility import ContractUtility, ContractUtilityError
+from erc8004_common.utils import Web3Utility, Web3UtilityError
 from erc8004_common.plugins.identity_registry import IdentityRegistryPlugin
 from erc8004_common.plugins.base import (
     PluginInitializationError,
@@ -57,7 +57,7 @@ class Agent:
     def __init__(self):
         """Initialize agent with default state."""
         self.config: Optional[Config] = None
-        self.contract_utility: Optional[ContractUtility] = None
+        self.web3_utility: Optional[Web3Utility] = None
         self.identity_plugin: Optional[IdentityRegistryPlugin] = None
         self.agent_id: Optional[int] = None
         self.running = False
@@ -86,19 +86,19 @@ class Agent:
                 f"domain={self.config.agent_domain}"
             )
 
-            # Initialize ContractUtility
+            # Initialize Web3Utility
             logger.info("Initializing contract utility")
-            self.contract_utility = ContractUtility(self.config)
-            if self.contract_utility.account:
+            self.web3_utility = Web3Utility(self.config)
+            if self.web3_utility.account:
                 logger.info(
                     f"Contract utility initialized for account: "
-                    f"{self.contract_utility.account.address}"
+                    f"{self.web3_utility.account.address}"
                 )
 
             # Initialize Identity Registry plugin
             logger.info("Loading Identity Registry plugin")
             self.identity_plugin = IdentityRegistryPlugin(
-                contract_utility=self.contract_utility,
+                contract_utility=self.web3_utility,
                 config=self.config
             )
             self.identity_plugin.initialize()
@@ -109,7 +109,7 @@ class Agent:
 
             logger.info("Agent initialization complete")
 
-        except ContractUtilityError as e:
+        except Web3UtilityError as e:
             raise AgentError(f"Contract utility initialization failed: {e}") from e
         except PluginInitializationError as e:
             raise AgentError(f"Plugin initialization failed: {e}") from e
@@ -128,7 +128,7 @@ class Agent:
         Raises:
             AgentError: If registration fails
         """
-        if not self.identity_plugin or not self.contract_utility or not self.config:
+        if not self.identity_plugin or not self.web3_utility or not self.config:
             raise AgentError("Agent not initialized. Call initialize() first.")
 
         # Check if we have persisted agent_id
@@ -153,8 +153,8 @@ class Agent:
 
         # Check if address is already registered
         try:
-            if self.contract_utility.account:
-                agent_address = self.contract_utility.account.address
+            if self.web3_utility.account:
+                agent_address = self.web3_utility.account.address
                 existing = self.identity_plugin.resolve_by_address(agent_address)
 
                 if existing:
@@ -184,7 +184,7 @@ class Agent:
                 f"✓ Registration successful! "
                 f"Agent ID: {self.agent_id}, "
                 f"Domain: {self.config.agent_domain}, "
-                f"Address: {self.contract_utility.account.address if self.contract_utility.account else 'unknown'}"
+                f"Address: {self.web3_utility.account.address if self.web3_utility.account else 'unknown'}"
             )
 
             # Persist state
@@ -255,7 +255,7 @@ class Agent:
             if self.identity_plugin:
                 logger.debug("Cleaning up Identity Registry plugin")
 
-            if self.contract_utility:
+            if self.web3_utility:
                 logger.debug("Cleaning up contract utility")
 
             logger.info("✓ Agent shutdown complete")
@@ -281,13 +281,13 @@ class Agent:
         }
 
         # Check contract utility
-        if self.contract_utility:
+        if self.web3_utility:
             try:
-                connected = self.contract_utility.w3.is_connected()
+                connected = self.web3_utility.w3.is_connected()
                 health["components"]["contract_utility"] = {
                     "status": "ok" if connected else "error",
                     "connected": connected,
-                    "chain_id": self.contract_utility.w3.eth.chain_id if connected else None
+                    "chain_id": self.web3_utility.w3.eth.chain_id if connected else None
                 }
             except Exception as e:
                 health["components"]["contract_utility"] = {
@@ -347,20 +347,20 @@ class Agent:
         if not self.config:
             raise AgentError("Cannot generate AgentCard: config not loaded")
 
-        if not self.contract_utility or not self.contract_utility.account:
+        if not self.web3_utility or not self.web3_utility.account:
             raise AgentError("Cannot generate AgentCard: contract utility not initialized")
 
         try:
             # Get chain ID from Web3 connection
-            chain_id = self.contract_utility.w3.eth.chain_id
+            chain_id = self.web3_utility.w3.eth.chain_id
 
             # Generate AgentCard
             agent_card = generate_agent_card(
                 agent_id=self.agent_id,
-                agent_address=self.contract_utility.account.address,
+                agent_address=self.web3_utility.account.address,
                 agent_domain=self.config.agent_domain,
                 chain_id=chain_id,
-                account=self.contract_utility.account,
+                account=self.web3_utility.account,
                 name=getattr(self.config, "agent_name", None),
                 description=getattr(self.config, "agent_description", None),
                 version=getattr(self.config, "agent_version", "1.0.0"),
@@ -468,7 +468,7 @@ class Agent:
         Raises:
             StateError: If state persistence fails
         """
-        if not self.config or not self.contract_utility:
+        if not self.config or not self.web3_utility:
             raise StateError("Cannot save state: agent not fully initialized")
 
         try:
@@ -476,8 +476,8 @@ class Agent:
             self.STATE_DIR.mkdir(parents=True, exist_ok=True)
 
             account_address = (
-                self.contract_utility.account.address
-                if self.contract_utility.account
+                self.web3_utility.account.address
+                if self.web3_utility.account
                 else None
             )
 
