@@ -18,7 +18,7 @@ from typing import Any, Optional
 
 import httpx
 
-from erc8004_common.utils import verify_rofl_attestation
+from erc8004_common.utils import verify_rofl_attestation, extract_address_from_caip10
 from erc8004_common.plugins import IdentityRegistryPlugin
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ class VerifiedCallError(Exception):
 
 
 async def call_verified_skill(
-    server_address: str,
+    server_agent_id: int,
     endpoint: str,
     identity_plugin: IdentityRegistryPlugin,
     web3_utility: Any,
@@ -39,13 +39,13 @@ async def call_verified_skill(
     json_data: Optional[dict] = None,
     timeout: int = 10,
 ) -> dict:
-    """Call any skill endpoint with full trustless verification.
+    """Call any skill endpoint with full trustless verification (v1.0).
 
     This is the core verification function that works with ANY skill.
     It handles the complete trust chain automatically.
 
     Args:
-        server_address: Server's Ethereum address
+        server_agent_id: Server's agent ID (v1.0 uses agentId, not address)
         endpoint: Skill endpoint path (e.g., "/skills/price")
         identity_plugin: Initialized identity registry plugin
         web3_utility: Web3Utility instance for signature verification
@@ -60,9 +60,9 @@ async def call_verified_skill(
         VerifiedCallError: If any verification step fails
 
     Example:
-        >>> # Call price skill
+        >>> # Call price skill (v1.0)
         >>> data = await call_verified_skill(
-        ...     "0xSERVER",
+        ...     42,  # server agent ID
         ...     "/skills/price",
         ...     identity_plugin,
         ...     web3_utility,
@@ -72,7 +72,7 @@ async def call_verified_skill(
 
         >>> # Call any custom skill
         >>> data = await call_verified_skill(
-        ...     "0xSERVER",
+        ...     42,  # server agent ID
         ...     "/skills/custom",
         ...     identity_plugin,
         ...     web3_utility,
@@ -85,18 +85,35 @@ async def call_verified_skill(
         - Identity registry authorization
         - ROFL TEE attestation
     """
-    from erc8004_common.utils import discover_agent
+    from erc8004_common.utils import discover_agent_by_id
 
-    logger.info(f"🔐 Verified call: {server_address}{endpoint}")
+    logger.info(f"🔐 Verified call: agent ID {server_agent_id}{endpoint}")
 
-    # Step 1: Discover server agent via identity registry
+    # Step 1: Discover server agent via identity registry (v1.0)
     logger.info("1️⃣ Discovering server agent...")
     try:
-        agent_card = await discover_agent(server_address, identity_plugin)
+        agent_card = await discover_agent_by_id(server_agent_id, identity_plugin)
         logger.info(f"   ✅ Found: {agent_card.name} at {agent_card.url}")
+
+        # Extract agent address from registrations (may be CAIP-10 format)
+        if not agent_card.registrations or len(agent_card.registrations) == 0:
+            raise VerifiedCallError(
+                f"Agent {server_agent_id} has no blockchain registrations"
+            )
+
+        # Get address from registration (may be CAIP-10 format: eip155:chainId:0x...)
+        server_address_caip10 = agent_card.registrations[0].agentAddress
+
+        # Extract plain Ethereum address for signature verification
+        # CAIP-10 is for identification; EIP-191 signatures use plain addresses
+        server_address = extract_address_from_caip10(server_address_caip10)
+        logger.info(f"   Agent address: {server_address}")
+
+    except VerifiedCallError:
+        raise
     except Exception as e:
         raise VerifiedCallError(
-            f"Server discovery failed for {server_address}: {e}"
+            f"Server discovery failed for agent ID {server_agent_id}: {e}"
         ) from e
 
     # Step 2: Call skill endpoint

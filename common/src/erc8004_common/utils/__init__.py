@@ -11,7 +11,7 @@ from .web3_utility import (
     Web3UtilityError,
 )
 from .agent_discovery import (
-    discover_agent,
+    discover_agent_by_id,
     fetch_agent_card,
     parse_agent_card,
     AgentDiscoveryError,
@@ -25,6 +25,12 @@ from .rofl_attestation import (
     ROFLAttestationError,
     AttestationVerificationError,
 )
+from .address import (
+    extract_address_from_caip10,
+    parse_caip10,
+    to_caip10,
+    AddressFormatError,
+)
 
 __all__ = [
     "ABILoadError",
@@ -32,7 +38,7 @@ __all__ = [
     "SigningError",
     "Web3Utility",
     "Web3UtilityError",
-    "discover_agent",
+    "discover_agent_by_id",
     "fetch_agent_card",
     "parse_agent_card",
     "AgentDiscoveryError",
@@ -43,4 +49,8 @@ __all__ = [
     "get_rofl_metadata",
     "ROFLAttestationError",
     "AttestationVerificationError",
+    "extract_address_from_caip10",
+    "parse_caip10",
+    "to_caip10",
+    "AddressFormatError",
 ]

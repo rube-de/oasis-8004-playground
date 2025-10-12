@@ -17,7 +17,11 @@ from . import api_server
 from .skills import call_verified_skill, get_verified_price, VerifiedCallError
 from erc8004_common.utils.agent_card import generate_agent_card
 from erc8004_common.utils import Web3Utility, Web3UtilityError
-from erc8004_common.plugins.identity_registry import IdentityRegistryPlugin
+from erc8004_common.plugins import (
+    IdentityRegistryPlugin,
+    ReputationRegistryPlugin,
+    ValidationRegistryPlugin,
+)
 from erc8004_common.plugins.base import (
     PluginInitializationError,
     PluginExecutionError,
@@ -60,6 +64,8 @@ class Agent:
         self.config: Optional[Config] = None
         self.web3_utility: Optional[Web3Utility] = None
         self.identity_plugin: Optional[IdentityRegistryPlugin] = None
+        self.reputation_plugin: Optional[ReputationRegistryPlugin] = None
+        self.validation_plugin: Optional[ValidationRegistryPlugin] = None
         self.agent_id: Optional[int] = None
         self.running = False
         self._shutdown_requested = False
@@ -105,6 +111,30 @@ class Agent:
             self.identity_plugin.initialize()
             logger.info("Identity Registry plugin initialized")
 
+            # Initialize Reputation Registry plugin (if configured)
+            if self.config.reputation_registry_address:
+                logger.info("Loading Reputation Registry plugin")
+                self.reputation_plugin = ReputationRegistryPlugin(
+                    web3_utility=self.web3_utility,
+                    config=self.config
+                )
+                self.reputation_plugin.initialize()
+                logger.info("Reputation Registry plugin initialized")
+            else:
+                logger.info("Reputation Registry not configured, skipping")
+
+            # Initialize Validation Registry plugin (if configured)
+            if self.config.validation_registry_address:
+                logger.info("Loading Validation Registry plugin")
+                self.validation_plugin = ValidationRegistryPlugin(
+                    web3_utility=self.web3_utility,
+                    config=self.config
+                )
+                self.validation_plugin.initialize()
+                logger.info("Validation Registry plugin initialized")
+            else:
+                logger.info("Validation Registry not configured, skipping")
+
             # Load persisted state
             self._load_state()
 
@@ -118,13 +148,13 @@ class Agent:
             raise AgentError(f"Unexpected initialization error: {e}") from e
 
     def ensure_registered(self) -> int:
-        """Ensure agent is registered with Identity Registry.
+        """Ensure agent is registered with Identity Registry (v1.0).
 
         Checks if agent is already registered (from state or on-chain).
-        If not registered, executes registration workflow.
+        If not registered, executes registration workflow with optional tokenURI.
 
         Returns:
-            Agent ID (either existing or newly assigned)
+            Agent ID (ERC-721 tokenId, either existing or newly assigned)
 
         Raises:
             AgentError: If registration fails
@@ -136,15 +166,22 @@ class Agent:
         if self.agent_id is not None:
             logger.info(f"Agent already registered with ID: {self.agent_id}")
 
-            # Verify on-chain
+            # Verify on-chain (v1.0: check if agent exists)
             try:
-                agent_info = self.identity_plugin.get_agent(self.agent_id)
-                logger.info(
-                    f"Verified on-chain: "
-                    f"domain={agent_info['agentDomain']}, "
-                    f"address={agent_info['agentAddress']}"
-                )
-                return self.agent_id
+                if self.identity_plugin.agent_exists(self.agent_id):
+                    owner = self.identity_plugin.owner_of(self.agent_id)
+                    token_uri = self.identity_plugin.token_uri(self.agent_id)
+                    logger.info(
+                        f"Verified on-chain: agentId={self.agent_id}, "
+                        f"owner={owner}, tokenURI={token_uri or '(none)'}"
+                    )
+                    return self.agent_id
+                else:
+                    logger.warning(
+                        f"Agent ID {self.agent_id} not found on-chain. "
+                        f"Proceeding with re-registration..."
+                    )
+                    self.agent_id = None
             except Exception as e:
                 logger.warning(
                     f"Could not verify agent {self.agent_id} on-chain: {e}. "
@@ -152,40 +189,24 @@ class Agent:
                 )
                 self.agent_id = None
 
-        # Check if address is already registered
-        try:
-            if self.web3_utility.account:
-                agent_address = self.web3_utility.account.address
-                existing = self.identity_plugin.resolve_by_address(agent_address)
-
-                if existing:
-                    agent_id = existing["agentId"]
-                    logger.info(
-                        f"Agent already registered on-chain with ID: {agent_id}"
-                    )
-                    self.agent_id = agent_id
-                    self._save_state()
-
-                    # Generate AgentCard if not already exists
-                    if not self.AGENT_CARD_FILE.exists():
-                        self.generate_and_save_agent_card()
-
-                    return agent_id
-        except Exception:
-            # Not found, proceed with registration
-            pass
-
-        # Execute registration
+        # Execute registration (v1.0: use tokenURI-based registration)
         logger.info("No existing registration found. Starting registration workflow...")
 
         try:
-            self.agent_id = self.identity_plugin.register()
+            # Use configured tokenURI if provided, otherwise register without URI
+            token_uri = self.config.agent_token_uri or ""
+
+            if token_uri:
+                logger.info(f"Registering agent with tokenURI: {token_uri}")
+                self.agent_id = self.identity_plugin.register(token_uri=token_uri)
+            else:
+                logger.info("Registering agent without tokenURI (can be set later)")
+                self.agent_id = self.identity_plugin.register()
 
             logger.info(
                 f"✓ Registration successful! "
-                f"Agent ID: {self.agent_id}, "
-                f"Domain: {self.config.agent_domain}, "
-                f"Address: {self.web3_utility.account.address if self.web3_utility.account else 'unknown'}"
+                f"Agent ID: {self.agent_id} (ERC-721 NFT), "
+                f"Owner: {self.web3_utility.account.address if self.web3_utility.account else 'unknown'}"
             )
 
             # Persist state
@@ -201,37 +222,37 @@ class Agent:
         except Exception as e:
             raise AgentError(f"Unexpected registration error: {e}") from e
 
-    async def discover_server_agent(self, server_address: str) -> None:
-        """Discover agent server and log its capabilities.
+    async def discover_server_agent(self, server_agent_id: int) -> None:
+        """Discover agent server and log its capabilities (v1.0).
 
-        Performs complete agent discovery workflow:
-        1. Resolve server address to domain via IdentityRegistry
-        2. Fetch AgentCard from RFC 8615 endpoint
+        Performs complete agent discovery workflow (v1.0 tokenURI-based):
+        1. Get tokenURI from IdentityRegistry (points to AgentCard URL)
+        2. Fetch AgentCard from tokenURI
         3. Parse and log agent capabilities and skills
 
         Args:
-            server_address: Ethereum address of agent server to discover
+            server_agent_id: Agent ID of server to discover (v1.0 uses agentId, not address)
 
         Raises:
             AgentError: If discovery fails (agent not found, network error, etc.)
 
         Example:
-            >>> await agent.discover_server_agent("0x123...")
-            🔍 Discovering agent at address: 0x123...
+            >>> await agent.discover_server_agent(42)
+            🔍 Discovering agent ID: 42
             ✅ Discovered agent: Server Agent
                Skills (3):
                - Identity Registration: Register agent in ERC-8004 Identity Registry
         """
         from erc8004_common.utils.agent_discovery import (
-            discover_agent,
+            discover_agent_by_id,
             AgentDiscoveryError,
         )
 
-        logger.info(f"🔍 Discovering agent at address: {server_address}")
+        logger.info(f"🔍 Discovering agent ID: {server_agent_id}")
 
         try:
-            # Discover agent via registry and fetch AgentCard
-            agent_card = await discover_agent(server_address, self.identity_plugin)
+            # Discover agent via registry and fetch AgentCard (v1.0)
+            agent_card = await discover_agent_by_id(server_agent_id, self.identity_plugin)
 
             # Log agent information
             logger.info(f"✅ Discovered agent: {agent_card.name}")
@@ -279,24 +300,24 @@ class Agent:
 
     async def call_skill(
         self,
-        server_address: str,
+        server_agent_id: int,
         endpoint: str,
         method: str = "POST",
         json_data: Optional[dict] = None,
         timeout: int = 10,
     ) -> dict:
-        """Call any ROFL server skill with full trustless verification.
+        """Call any ROFL server skill with full trustless verification (v1.0).
 
         Generic method for calling any skill endpoint on a ROFL-based agent server.
         Performs complete verification chain:
-        1. Server discovery via identity registry
+        1. Server discovery via identity registry (using agent ID)
         2. HTTP endpoint call
         3. Cryptographic signature verification (EIP-191)
         4. Signer identity verification against registry
         5. ROFL TEE attestation verification
 
         Args:
-            server_address: Server's Ethereum address (from identity registry)
+            server_agent_id: Server's agent ID from IdentityRegistry (v1.0)
             endpoint: Skill endpoint path (e.g., "/skills/price")
             method: HTTP method (default: POST)
             json_data: Request payload (optional)
@@ -309,9 +330,9 @@ class Agent:
             AgentError: If agent not initialized or verification fails
 
         Example:
-            >>> # Call price skill
+            >>> # Call price skill (v1.0 - using agent ID)
             >>> price_data = await agent.call_skill(
-            ...     "0xSERVER",
+            ...     42,  # server agent ID
             ...     "/skills/price",
             ...     json_data={"symbol": "BTC-USD"}
             ... )
@@ -319,7 +340,7 @@ class Agent:
 
             >>> # Call any custom skill
             >>> result = await agent.call_skill(
-            ...     "0xSERVER",
+            ...     42,  # server agent ID
             ...     "/skills/custom",
             ...     json_data={"query": "analyze"}
             ... )
@@ -332,11 +353,11 @@ class Agent:
         if not self.identity_plugin or not self.web3_utility:
             raise AgentError("Agent not initialized. Call initialize() first.")
 
-        logger.info(f"🔐 Calling verified skill: {server_address}{endpoint}")
+        logger.info(f"🔐 Calling verified skill: agent ID {server_agent_id}{endpoint}")
 
         try:
             result = await call_verified_skill(
-                server_address=server_address,
+                server_agent_id=server_agent_id,
                 endpoint=endpoint,
                 identity_plugin=self.identity_plugin,
                 web3_utility=self.web3_utility,
@@ -357,16 +378,16 @@ class Agent:
 
     async def get_price(
         self,
-        server_address: str,
+        server_agent_id: int,
         symbol: str,
     ) -> dict:
-        """Get verified cryptocurrency price from ROFL server.
+        """Get verified cryptocurrency price from ROFL server (v1.0).
 
         Convenience wrapper around call_skill() specifically for the price endpoint.
         Provides full trustless verification of price data.
 
         Args:
-            server_address: Server's Ethereum address (from identity registry)
+            server_agent_id: Server's agent ID from IdentityRegistry (v1.0)
             symbol: Trading pair symbol (e.g., "BTC-USD", "ETH-USD")
 
         Returns:
@@ -381,13 +402,13 @@ class Agent:
             AgentError: If agent not initialized or verification fails
 
         Example:
-            >>> price_data = await agent.get_price("0x123...", "BTC-USD")
+            >>> price_data = await agent.get_price(42, "BTC-USD")  # v1.0: agent ID
             >>> print(f"BTC Price: ${price_data['price']:,.2f}")
             BTC Price: $45,000.50
 
         Security:
             Complete trustless verification:
-            - Server discovery via identity registry
+            - Server discovery via identity registry (using agent ID)
             - Cryptographic signature verification (EIP-191)
             - Signer identity verification
             - ROFL TEE attestation check
@@ -395,11 +416,11 @@ class Agent:
         if not self.identity_plugin or not self.web3_utility:
             raise AgentError("Agent not initialized. Call initialize() first.")
 
-        logger.info(f"📊 Getting verified price for {symbol} from {server_address}")
+        logger.info(f"📊 Getting verified price for {symbol} from agent ID {server_agent_id}")
 
         try:
             result = await get_verified_price(
-                server_address=server_address,
+                server_agent_id=server_agent_id,
                 symbol=symbol,
                 identity_plugin=self.identity_plugin,
                 web3_utility=self.web3_utility,
@@ -680,7 +701,7 @@ class Agent:
             logger.warning(f"Failed to load state: {e}. Starting fresh.")
 
     def _save_state(self) -> None:
-        """Persist agent state to disk.
+        """Persist agent state to disk (v1.0: includes tokenURI).
 
         Raises:
             StateError: If state persistence fails
@@ -698,9 +719,17 @@ class Agent:
                 else None
             )
 
+            # Get tokenURI if agent is registered (v1.0)
+            token_uri = None
+            if self.agent_id and self.identity_plugin:
+                try:
+                    token_uri = self.identity_plugin.token_uri(self.agent_id)
+                except Exception:
+                    pass  # Agent may not have tokenURI set yet
+
             state = {
                 "agent_id": self.agent_id,
-                "domain": self.config.agent_domain,
+                "token_uri": token_uri,
                 "address": account_address,
                 "timestamp": time.time()
             }

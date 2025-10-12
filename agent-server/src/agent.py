@@ -151,39 +151,25 @@ class Agent:
                 )
                 self.agent_id = None
 
-        # Check if address is already registered
-        try:
-            if self.web3_utility.account:
-                agent_address = self.web3_utility.account.address
-                existing = self.identity_plugin.resolve_by_address(agent_address)
+        # v1.0 Note: Cannot check if address is already registered on-chain
+        # (no reverse mapping from address → agentId in v1.0)
+        # Rely on persisted state; contract will revert if already registered
 
-                if existing:
-                    agent_id = existing["agentId"]
-                    logger.info(
-                        f"Agent already registered on-chain with ID: {agent_id}"
-                    )
-                    self.agent_id = agent_id
-                    self._save_state()
-
-                    # Generate AgentCard if not already exists
-                    if not self.AGENT_CARD_FILE.exists():
-                        self.generate_and_save_agent_card()
-
-                    return agent_id
-        except Exception:
-            # Not found, proceed with registration
-            pass
-
-        # Execute registration
+        # Execute registration with tokenURI pointing to AgentCard
         logger.info("No existing registration found. Starting registration workflow...")
 
         try:
-            self.agent_id = self.identity_plugin.register()
+            # v1.0: tokenURI should point to RFC 8615 compliant AgentCard endpoint
+            token_uri = f"http://{self.config.agent_domain}/.well-known/agent-card.json"
+
+            logger.info(f"Registering with tokenURI: {token_uri}")
+            self.agent_id = self.identity_plugin.register(token_uri=token_uri)
 
             logger.info(
                 f"✓ Registration successful! "
                 f"Agent ID: {self.agent_id}, "
                 f"Domain: {self.config.agent_domain}, "
+                f"TokenURI: {token_uri}, "
                 f"Address: {self.web3_utility.account.address if self.web3_utility.account else 'unknown'}"
             )
 

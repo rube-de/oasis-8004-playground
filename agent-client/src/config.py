@@ -13,15 +13,17 @@ class Config(BaseConfig):
 
     Client-Specific Required Configuration:
         - PRIVATE_KEY: Private key for transaction signing (without 0x prefix)
-        - AGENT_DOMAIN: Domain for agent registration (RFC 8615 compliant)
 
-    Optional AgentCard Customization:
-        - AGENT_NAME: Custom agent name for AgentCard (default: auto-generated)
-        - AGENT_DESCRIPTION: Custom agent description for AgentCard
+    Optional Registration Configuration (v1.0):
+        - AGENT_TOKEN_URI: TokenURI for registration (IPFS/HTTPS, optional)
+        - AGENT_NAME: Custom agent name for registration/AgentCard (default: auto-generated)
+        - AGENT_DESCRIPTION: Custom agent description for registration/AgentCard
         - AGENT_VERSION: Agent version for AgentCard (default: "1.0.0")
 
     Optional API Server Configuration:
-        - API_PORT: Port for AgentCard API server (default: 8000)
+        - API_PORT: Port for AgentCard API server (default: 80)
+        - AGENT_DOMAIN: Agent domain for RFC 8615/A2A Protocol (default: "localhost")
+          NOTE: v1.0 removed on-chain domain storage - this is off-chain only
 
     Inherited from BaseConfig:
         - RPC_URL: Ethereum RPC endpoint URL
@@ -44,20 +46,21 @@ class Config(BaseConfig):
         description="Private key for transaction signing (without 0x prefix)",
     )
 
-    agent_domain: str = Field(
-        ...,
-        description="Domain for agent registration (RFC 8615 compliant)",
+    # Optional agent registration fields (v1.0)
+    agent_token_uri: str | None = Field(
+        default=None,
+        description="Agent tokenURI for registration (IPFS/HTTPS URI, optional)",
     )
 
     # Optional AgentCard customization fields
     agent_name: str | None = Field(
         default=None,
-        description="Custom agent name for AgentCard (defaults to 'ERC-8004 Agent {id}')",
+        description="Custom agent name for AgentCard and registration (defaults to auto-generated)",
     )
 
     agent_description: str | None = Field(
         default=None,
-        description="Custom agent description for AgentCard",
+        description="Custom agent description for AgentCard and registration",
     )
 
     agent_version: str = Field(
@@ -73,10 +76,19 @@ class Config(BaseConfig):
         le=65535,
     )
 
-    # Optional agent discovery configuration
-    agent_server_address: str | None = Field(
+    # Agent domain configuration (OFF-CHAIN ONLY - RFC 8615 / A2A Protocol)
+    # NOTE: v1.0 removed on-chain domain storage from IdentityRegistry
+    # Domain is now used exclusively for off-chain service discovery and API endpoints
+    agent_domain: str = Field(
+        default="localhost",
+        description="Agent domain for RFC 8615 AgentCard hosting and A2A Protocol URL (NOT stored on-chain)",
+    )
+
+    # Optional agent discovery configuration (v1.0)
+    # v1.0 Note: Discovery requires agent ID (not address) as contracts don't support reverse lookups
+    agent_server_id: int | None = Field(
         default=None,
-        description="Optional: Agent server address to discover on startup (e.g., 0x123...)",
+        description="Optional: Agent server ID for discovery on startup (v1.0 uses agentId, not address)",
     )
 
     @field_validator("private_key")
@@ -110,28 +122,3 @@ class Config(BaseConfig):
             raise ValueError("Private key must be a valid hex string")
 
         return v
-
-    @field_validator("agent_domain")
-    @classmethod
-    def validate_agent_domain(cls, v: str) -> str:
-        """Validate agent domain format.
-
-        Basic validation for domain format. Should be RFC 8615 compliant.
-
-        Args:
-            v: Domain string
-
-        Returns:
-            Validated domain
-
-        Raises:
-            ValueError: If domain format is invalid
-        """
-        if not v or len(v.strip()) == 0:
-            raise ValueError("Agent domain cannot be empty")
-
-        # Basic validation: should contain at least one dot or be localhost
-        if "." not in v and v != "localhost":
-            raise ValueError("Agent domain must be a valid domain name or 'localhost'")
-
-        return v.lower().strip()

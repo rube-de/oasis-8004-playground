@@ -113,8 +113,8 @@ def display_error(error: Exception, context: str = "") -> None:
     print()
 
 
-async def test_skills(agent: Agent, server_address: str) -> None:
-    """Test skill verification with ROFL server.
+async def test_skills(agent: Agent, server_agent_id: int) -> None:
+    """Test skill verification with ROFL server (v1.0).
 
     Demonstrates trustless skill calling with complete verification chain:
     - Generic skill call (call_skill)
@@ -122,7 +122,7 @@ async def test_skills(agent: Agent, server_address: str) -> None:
 
     Args:
         agent: Initialized agent instance
-        server_address: Server's Ethereum address to test with
+        server_agent_id: Server's agent ID from IdentityRegistry (v1.0)
 
     Raises:
         AgentError: If skill tests fail
@@ -139,7 +139,7 @@ async def test_skills(agent: Agent, server_address: str) -> None:
         logger.info("-" * 60)
 
         price_data = await agent.get_price(
-            server_address=server_address,
+            server_agent_id=server_agent_id,
             symbol="BTC-USD"
         )
 
@@ -153,7 +153,7 @@ async def test_skills(agent: Agent, server_address: str) -> None:
         logger.info("-" * 60)
 
         eth_data = await agent.call_skill(
-            server_address=server_address,
+            server_agent_id=server_agent_id,
             endpoint="/skills/price",
             method="POST",
             json_data={"symbol": "ETH-USD"}
@@ -172,7 +172,7 @@ async def test_skills(agent: Agent, server_address: str) -> None:
         logger.error(f"\n❌ Skill test failed: {e}")
         logger.info("\nNote: Skill tests require:")
         logger.info("  • Agent server running and registered")
-        logger.info("  • Valid AGENT_SERVER_ADDRESS in .env")
+        logger.info("  • Valid AGENT_SERVER_ID in .env (v1.0)")
         logger.info("  • Server implements /skills/price endpoint")
         logger.info("  • Server has ROFL attestation")
         raise
@@ -227,22 +227,21 @@ def main() -> NoReturn:
         else:
             raise AgentError("Registration failed: no agent ID returned")
 
-        # Optional: Discover agent-server and test skills if configured
-        if config.agent_server_address:
-            logger.info("Agent server address configured, initiating discovery...")
+        # Optional: Discover agent-server if configured (v1.0)
+        if config.agent_server_id:
+            logger.info(f"Agent server ID configured: {config.agent_server_id}, initiating discovery...")
             try:
-                asyncio.run(agent.discover_server_agent(config.agent_server_address))
-            except AgentError as e:
-                logger.warning(f"Agent discovery failed (non-fatal): {e}")
-                logger.info("Continuing with normal operations...")
+                asyncio.run(agent.discover_server_agent(config.agent_server_id))
 
-            # Test skills after discovery
-            logger.info("Testing verified skill calls...")
-            try:
-                asyncio.run(test_skills(agent, config.agent_server_address))
+                # Test skills after successful discovery
+                logger.info(f"Testing skills with discovered server agent ID {config.agent_server_id}...")
+                asyncio.run(test_skills(agent, config.agent_server_id))
+
             except AgentError as e:
-                logger.warning(f"Skill tests failed (non-fatal): {e}")
+                logger.warning(f"Agent discovery or skill test failed (non-fatal): {e}")
                 logger.info("Continuing with normal operations...")
+        else:
+            logger.info("No agent server ID configured (AGENT_SERVER_ID), skipping discovery and skill tests")
 
         # Run main event loop
         logger.info("Starting main event loop...")

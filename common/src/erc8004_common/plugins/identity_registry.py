@@ -1,16 +1,18 @@
-"""Identity Registry plugin for ERC-8004 agent registration."""
+"""Identity Registry plugin for ERC-8004 v1.0 agent registration.
+
+ERC-8004 v1.0 implements agent identities as ERC-721 NFTs with optional metadata.
+Agents are registered with tokenURIs pointing to off-chain registration JSON files.
+"""
 
 import logging
 import time
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from web3.exceptions import ContractLogicError, TimeExhausted
-from eth_typing import HexStr
 from hexbytes import HexBytes
 
 from .base import (
     BaseRegistryPlugin,
     PluginInitializationError,
-    PluginExecutionError,
     TransactionError,
     ContractCallError,
 )
@@ -19,7 +21,14 @@ logger = logging.getLogger(__name__)
 
 
 class IdentityRegistryPlugin(BaseRegistryPlugin):
-    """Plugin for Identity Registry: registration, updates, queries."""
+    """Plugin for Identity Registry: ERC-721 based agent registration.
+
+    ERC-8004 v1.0 Features:
+    - Agents are ERC-721 NFTs (transferable, tradeable)
+    - TokenURI points to registration JSON (IPFS/HTTPS)
+    - On-chain key-value metadata storage
+    - Three registration variants: register(), register(tokenURI), register(tokenURI, metadata)
+    """
 
     MAX_RETRIES = 3
     RETRY_BASE_DELAY = 2  # seconds
@@ -43,47 +52,75 @@ class IdentityRegistryPlugin(BaseRegistryPlugin):
                 address=self.contract_address,
             )
 
+            # Verify contract by checking ERC-721 interface
             try:
-                version = self._contract.functions.VERSION().call()
-                logger.info(f"Connected to IdentityRegistry v{version}")
+                total = self._contract.functions.totalAgents().call()
+                logger.info(f"Connected to IdentityRegistry with {total} registered agents")
             except Exception as e:
-                logger.warning(f"Could not verify version: {e}")
+                logger.warning(f"Could not verify registry state: {e}")
 
             self._initialized = True
             logger.info(f"{self.name} initialized")
         except Exception as e:
-            raise PluginInitializationError(f"Failed to initialize {self.name}: {str(e)}") from e
+            raise PluginInitializationError(
+                f"Failed to initialize {self.name}: {str(e)}"
+            ) from e
 
-    def register(self) -> int:
-        """Register agent. Returns agent ID."""
+    # ============ Registration Functions (v1.0) ============
+
+    def register(
+        self,
+        token_uri: str = "",
+        metadata: Optional[List[Dict[str, Any]]] = None
+    ) -> int:
+        """Register agent with optional tokenURI and metadata.
+
+        Supports three registration variants:
+        1. register() - No tokenURI (can be set later)
+        2. register(tokenURI) - With tokenURI only
+        3. register(tokenURI, metadata) - With tokenURI and metadata array
+
+        Args:
+            token_uri: Optional URI pointing to registration JSON (IPFS/HTTPS)
+            metadata: Optional list of {key: str, value: bytes} metadata entries
+
+        Returns:
+            Agent ID (ERC-721 tokenId)
+
+        Raises:
+            TransactionError: If registration fails
+
+        Example:
+            >>> # Simple registration
+            >>> agent_id = plugin.register()
+
+            >>> # With tokenURI
+            >>> agent_id = plugin.register("ipfs://QmXYZ.../agent.json")
+
+            >>> # With tokenURI and metadata
+            >>> metadata = [
+            ...     {"key": "agentName", "value": b"MyAgent"},
+            ...     {"key": "version", "value": b"1.0.0"}
+            ... ]
+            >>> agent_id = plugin.register("ipfs://QmXYZ.../agent.json", metadata)
+        """
         self._ensure_initialized()
 
-        agent_domain = self.config.agent_domain
-        agent_address = self.web3_utility.account.address
-
-        logger.info(f"Registering agent: domain={agent_domain}, address={agent_address}")
-
-        # Check if already registered
-        try:
-            existing = self._resolve_by_address_internal(agent_address)
-            if existing:
-                raise ValueError(
-                    f"Agent already registered with ID {existing['agentId']}. "
-                    f"Use update() to modify registration."
-                )
-        except ContractCallError:
-            # Not found - proceed with registration
-            pass
+        logger.info(
+            f"Registering agent: "
+            f"tokenURI={'yes' if token_uri else 'no'}, "
+            f"metadata={len(metadata) if metadata else 0} entries"
+        )
 
         # Execute registration with retry logic
         for attempt in range(1, self.MAX_RETRIES + 1):
             try:
-                tx_hash = self._send_registration_transaction(agent_domain, agent_address)
+                tx_hash = self._send_registration_transaction(token_uri, metadata)
                 agent_id = self._wait_for_registration(tx_hash)
 
                 logger.info(
                     f"Agent registered successfully: "
-                    f"ID={agent_id}, domain={agent_domain}, tx={tx_hash.hex()}"
+                    f"ID={agent_id}, tokenURI={token_uri or '(none)'}, tx={tx_hash.hex()}"
                 )
 
                 return agent_id
@@ -100,41 +137,49 @@ class IdentityRegistryPlugin(BaseRegistryPlugin):
                     logger.error(f"Registration failed after {self.MAX_RETRIES} attempts")
                     raise
 
-    def _send_registration_transaction(self, agent_domain: str, agent_address: str) -> HexBytes:
+    def _send_registration_transaction(
+        self,
+        token_uri: str,
+        metadata: Optional[List[Dict[str, Any]]]
+    ) -> HexBytes:
         """Build and send registration transaction. Returns tx hash."""
         try:
-            # Send transaction - Web3 middleware will add "from" automatically
-            tx_hash = self.contract.functions.newAgent(agent_domain, agent_address).transact({
-                "gas": 300000,
-                "gasPrice": self.web3_utility.w3.eth.gas_price,
-            })
-            logger.debug(f"Transaction submitted: {tx_hash.hex()}")
+            # Choose registration variant based on parameters
+            if metadata and len(metadata) > 0:
+                # Variant 3: register(tokenURI, metadata[])
+                metadata_tuples = [
+                    (entry["key"], entry["value"])
+                    for entry in metadata
+                ]
+                tx_hash = self.contract.functions.register(
+                    token_uri,
+                    metadata_tuples
+                ).transact()
+                logger.debug(f"Registration variant: register(tokenURI, metadata)")
 
+            elif token_uri:
+                # Variant 2: register(tokenURI)
+                tx_hash = self.contract.functions.register(token_uri).transact()
+                logger.debug(f"Registration variant: register(tokenURI)")
+
+            else:
+                # Variant 1: register()
+                tx_hash = self.contract.functions.register().transact()
+                logger.debug(f"Registration variant: register()")
+
+            logger.debug(f"Transaction submitted: {tx_hash.hex()}")
             return tx_hash
 
         except ContractLogicError as e:
             # Contract-level errors (reverts)
             error_msg = str(e)
-            if "DomainAlreadyRegistered" in error_msg:
-                raise TransactionError(
-                    f"Domain '{agent_domain}' is already registered"
-                ) from e
-            elif "AddressAlreadyRegistered" in error_msg:
-                raise TransactionError(
-                    f"Address '{agent_address}' is already registered"
-                ) from e
-            elif "UnauthorizedRegistration" in error_msg:
-                raise TransactionError(
-                    "Cannot register on behalf of another address"
-                ) from e
-            else:
-                raise TransactionError(f"Contract error: {error_msg}") from e
+            raise TransactionError(f"Contract error during registration: {error_msg}") from e
 
         except Exception as e:
-            raise TransactionError(f"Failed to send transaction: {str(e)}") from e
+            raise TransactionError(f"Failed to send registration transaction: {str(e)}") from e
 
     def _wait_for_registration(self, tx_hash: HexBytes) -> int:
-        """Wait for transaction and extract agent ID from event."""
+        """Wait for transaction and extract agent ID from Registered event."""
         try:
             # Wait for transaction receipt
             logger.debug(f"Waiting for transaction confirmation (timeout: {self.config.tx_timeout}s)")
@@ -144,12 +189,10 @@ class IdentityRegistryPlugin(BaseRegistryPlugin):
 
             # Check transaction status
             if receipt["status"] != 1:
-                raise TransactionError(
-                    f"Transaction reverted: {tx_hash.hex()}"
-                )
+                raise TransactionError(f"Transaction reverted: {tx_hash.hex()}")
 
-            # Parse AgentRegistered event
-            agent_id = self._parse_agent_registered_event(receipt)
+            # Parse Registered event (v1.0 event name)
+            agent_id = self._parse_registered_event(receipt)
 
             return agent_id
 
@@ -161,106 +204,231 @@ class IdentityRegistryPlugin(BaseRegistryPlugin):
             if isinstance(e, TransactionError):
                 raise
             raise TransactionError(
-                f"Failed to confirm transaction: {str(e)}"
+                f"Failed to confirm registration transaction: {str(e)}"
             ) from e
 
-    def _parse_agent_registered_event(self, receipt: Dict[str, Any]) -> int:
-        """Parse AgentRegistered event and return agent ID."""
+    def _parse_registered_event(self, receipt: Dict[str, Any]) -> int:
+        """Parse Registered event and return agent ID.
+
+        v1.0 Event: Registered(uint256 indexed agentId, string tokenURI, address indexed owner)
+        """
         try:
             # Get event signature
-            event = self.contract.events.AgentRegistered()
+            event = self.contract.events.Registered()
 
-            # Process logs to find AgentRegistered event
+            # Process logs to find Registered event
             logs = event.process_receipt(receipt)
 
             if not logs:
-                raise TransactionError("AgentRegistered event not found in transaction logs")
+                raise TransactionError("Registered event not found in transaction logs")
 
             # Extract agent ID from first matching event
             agent_id = logs[0]["args"]["agentId"]
 
-            logger.debug(f"Parsed AgentRegistered event: agentId={agent_id}")
+            logger.debug(f"Parsed Registered event: agentId={agent_id}")
             return agent_id
 
         except Exception as e:
             if isinstance(e, TransactionError):
                 raise
-            raise TransactionError(f"Failed to parse event: {str(e)}") from e
+            raise TransactionError(f"Failed to parse Registered event: {str(e)}") from e
 
-    def get_agent(self, agent_id: int) -> Dict[str, Any]:
-        """Get agent info by ID. Returns dict with agentId, agentDomain, agentAddress."""
+    # ============ Metadata Functions (v1.0) ============
+
+    def set_metadata(self, agent_id: int, key: str, value: bytes) -> str:
+        """Set on-chain metadata for agent.
+
+        Only the owner or approved operator can set metadata.
+
+        Args:
+            agent_id: Agent ID (ERC-721 tokenId)
+            key: Metadata key
+            value: Metadata value as bytes
+
+        Returns:
+            Transaction hash
+
+        Raises:
+            TransactionError: If metadata setting fails
+        """
+        self._ensure_initialized()
+
+        logger.info(f"Setting metadata: agentId={agent_id}, key={key}")
+
+        try:
+            tx_hash = self.contract.functions.setMetadata(
+                agent_id, key, value
+            ).transact()
+
+            receipt = self.web3_utility.w3.eth.wait_for_transaction_receipt(
+                tx_hash, timeout=self.config.tx_timeout
+            )
+
+            if receipt["status"] != 1:
+                raise TransactionError(f"Metadata setting failed: tx_hash={tx_hash.hex()}")
+
+            logger.info(f"Metadata set: agentId={agent_id}, key={key}, tx={tx_hash.hex()}")
+            return tx_hash.hex()
+
+        except ContractLogicError as e:
+            raise TransactionError(f"Contract error setting metadata: {e}") from e
+        except Exception as e:
+            raise TransactionError(f"Failed to set metadata: {e}") from e
+
+    def get_metadata(self, agent_id: int, key: str) -> bytes:
+        """Get on-chain metadata for agent.
+
+        Args:
+            agent_id: Agent ID
+            key: Metadata key
+
+        Returns:
+            Metadata value as bytes
+
+        Raises:
+            ContractCallError: If metadata retrieval fails
+        """
         self._ensure_initialized()
 
         try:
-            result = self.contract.functions.getAgent(agent_id).call()
-
-            # Result is a tuple: (agentId, agentDomain, agentAddress)
-            return {
-                "agentId": result[0],
-                "agentDomain": result[1],
-                "agentAddress": result[2],
-            }
+            value = self.contract.functions.getMetadata(agent_id, key).call()
+            logger.debug(f"Retrieved metadata: agentId={agent_id}, key={key}")
+            return value
 
         except ContractLogicError as e:
-            if "AgentNotFound" in str(e):
-                raise ContractCallError(f"Agent ID {agent_id} not found") from e
-            raise ContractCallError(f"Failed to get agent: {str(e)}") from e
+            if "Agent does not exist" in str(e):
+                raise ContractCallError(f"Agent ID {agent_id} does not exist") from e
+            raise ContractCallError(f"Failed to get metadata: {e}") from e
         except Exception as e:
-            raise ContractCallError(f"Failed to get agent: {str(e)}") from e
+            raise ContractCallError(f"Failed to get metadata: {e}") from e
 
-    def resolve_by_address(self, address: str) -> Dict[str, Any]:
-        """Resolve agent by address."""
+    # ============ ERC-721 Query Functions ============
+
+    def token_uri(self, agent_id: int) -> str:
+        """Get agent tokenURI (IPFS/HTTPS URI).
+
+        Args:
+            agent_id: Agent ID
+
+        Returns:
+            TokenURI string
+
+        Raises:
+            ContractCallError: If query fails
+        """
         self._ensure_initialized()
 
         try:
-            checksum_address = self.web3_utility.w3.to_checksum_address(address)
-            result = self.contract.functions.resolveByAddress(checksum_address).call()
-
-            return {
-                "agentId": result[0],
-                "agentDomain": result[1],
-                "agentAddress": result[2],
-            }
+            uri = self.contract.functions.tokenURI(agent_id).call()
+            logger.debug(f"Retrieved tokenURI: agentId={agent_id}, uri={uri}")
+            return uri
 
         except ContractLogicError as e:
-            if "AgentNotFound" in str(e):
-                raise ContractCallError(f"No agent found for address {address}") from e
-            raise ContractCallError(f"Failed to resolve by address: {str(e)}") from e
+            if "nonexistent token" in str(e).lower():
+                raise ContractCallError(f"Agent ID {agent_id} does not exist") from e
+            raise ContractCallError(f"Failed to get tokenURI: {e}") from e
         except Exception as e:
-            raise ContractCallError(f"Failed to resolve by address: {str(e)}") from e
+            raise ContractCallError(f"Failed to get tokenURI: {e}") from e
 
-    def _resolve_by_address_internal(self, address: str) -> Optional[Dict[str, Any]]:
-        """Resolve by address, return None if not found (no exception)."""
-        try:
-            return self.resolve_by_address(address)
-        except ContractCallError:
-            return None
+    def owner_of(self, agent_id: int) -> str:
+        """Get agent owner address (ERC-721 ownership).
 
-    def resolve_by_domain(self, domain: str) -> Dict[str, Any]:
-        """Resolve agent by domain."""
+        Args:
+            agent_id: Agent ID
+
+        Returns:
+            Owner address (checksummed)
+
+        Raises:
+            ContractCallError: If query fails
+        """
         self._ensure_initialized()
 
         try:
-            result = self.contract.functions.resolveByDomain(domain).call()
-
-            return {
-                "agentId": result[0],
-                "agentDomain": result[1],
-                "agentAddress": result[2],
-            }
+            owner = self.contract.functions.ownerOf(agent_id).call()
+            logger.debug(f"Retrieved owner: agentId={agent_id}, owner={owner}")
+            return owner
 
         except ContractLogicError as e:
-            if "AgentNotFound" in str(e):
-                raise ContractCallError(f"No agent found for domain '{domain}'") from e
-            raise ContractCallError(f"Failed to resolve by domain: {str(e)}") from e
+            if "nonexistent token" in str(e).lower():
+                raise ContractCallError(f"Agent ID {agent_id} does not exist") from e
+            raise ContractCallError(f"Failed to get owner: {e}") from e
         except Exception as e:
-            raise ContractCallError(f"Failed to resolve by domain: {str(e)}") from e
+            raise ContractCallError(f"Failed to get owner: {e}") from e
 
     def agent_exists(self, agent_id: int) -> bool:
-        """Check if agent ID exists."""
+        """Check if agent exists.
+
+        Args:
+            agent_id: Agent ID to check
+
+        Returns:
+            True if agent exists, False otherwise
+        """
         self._ensure_initialized()
 
         try:
-            return self.contract.functions.agentExists(agent_id).call()
+            exists = self.contract.functions.agentExists(agent_id).call()
+            return exists
         except Exception as e:
-            raise ContractCallError(f"Failed to check agent existence: {str(e)}") from e
+            raise ContractCallError(f"Failed to check agent existence: {e}") from e
+
+    def total_agents(self) -> int:
+        """Get total number of registered agents.
+
+        Returns:
+            Total agent count
+        """
+        self._ensure_initialized()
+
+        try:
+            total = self.contract.functions.totalAgents().call()
+            return total
+        except Exception as e:
+            raise ContractCallError(f"Failed to get total agents: {e}") from e
+
+    # ============ ERC-721 Transfer Functions (Optional) ============
+
+    def transfer_from(self, from_addr: str, to_addr: str, agent_id: int) -> str:
+        """Transfer agent ownership (ERC-721 transfer).
+
+        Must be called by owner or approved operator.
+
+        Args:
+            from_addr: Current owner address
+            to_addr: New owner address
+            agent_id: Agent ID to transfer
+
+        Returns:
+            Transaction hash
+
+        Raises:
+            TransactionError: If transfer fails
+        """
+        self._ensure_initialized()
+
+        logger.info(f"Transferring agent: agentId={agent_id}, from={from_addr}, to={to_addr}")
+
+        try:
+            # Convert addresses to checksum format
+            from_checksum = self.web3_utility.w3.to_checksum_address(from_addr)
+            to_checksum = self.web3_utility.w3.to_checksum_address(to_addr)
+
+            tx_hash = self.contract.functions.transferFrom(
+                from_checksum, to_checksum, agent_id
+            ).transact()
+
+            receipt = self.web3_utility.w3.eth.wait_for_transaction_receipt(
+                tx_hash, timeout=self.config.tx_timeout
+            )
+
+            if receipt["status"] != 1:
+                raise TransactionError(f"Transfer failed: tx_hash={tx_hash.hex()}")
+
+            logger.info(f"Agent transferred: agentId={agent_id}, tx={tx_hash.hex()}")
+            return tx_hash.hex()
+
+        except ContractLogicError as e:
+            raise TransactionError(f"Contract error during transfer: {e}") from e
+        except Exception as e:
+            raise TransactionError(f"Failed to transfer agent: {e}") from e

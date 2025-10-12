@@ -12,6 +12,8 @@ from .base import (
     TransactionError,
 )
 from .identity_registry import IdentityRegistryPlugin
+from .reputation_registry import ReputationRegistryPlugin
+from .validation_registry import ValidationRegistryPlugin
 
 __all__ = [
     "BaseRegistryPlugin",
@@ -20,5 +22,7 @@ __all__ = [
     "PluginError",
     "PluginExecutionError",
     "PluginInitializationError",
+    "ReputationRegistryPlugin",
     "TransactionError",
+    "ValidationRegistryPlugin",
 ]

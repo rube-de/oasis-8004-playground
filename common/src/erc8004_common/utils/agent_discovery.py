@@ -229,61 +229,85 @@ def parse_agent_card(agent_card_json: dict[str, Any]) -> AgentCard:
         ) from e
 
 
-async def discover_agent(
-    agent_address: str,
+async def discover_agent_by_id(
+    agent_id: int,
     identity_plugin: IdentityRegistryPlugin,
 ) -> AgentCard:
-    """Discover agent by resolving address to domain and fetching AgentCard.
+    """Discover agent by ID using v1.0 tokenURI-based flow.
 
-    Complete agent discovery workflow:
-    1. Resolve blockchain address to domain via IdentityRegistry
-    2. Fetch AgentCard from RFC 8615 endpoint
+    ERC-8004 v1.0 discovery workflow:
+    1. Get tokenURI from IdentityRegistry (points to AgentCard URL)
+    2. Fetch AgentCard from tokenURI
     3. Parse and validate AgentCard
 
     Args:
-        agent_address: Ethereum address of agent to discover
+        agent_id: Agent ID from IdentityRegistry
         identity_plugin: Initialized IdentityRegistryPlugin instance
 
     Returns:
         Parsed and validated AgentCard
 
     Raises:
-        AgentNotFoundError: If address not found in IdentityRegistry
+        AgentNotFoundError: If agent ID doesn't exist
         AgentCardFetchError: If fetching AgentCard fails
         AgentCardParseError: If AgentCard parsing fails
 
     Example:
         >>> plugin = IdentityRegistryPlugin(web3_utility, config)
         >>> plugin.initialize()
-        >>> card = await discover_agent("0x123...", plugin)
+        >>> card = await discover_agent_by_id(42, plugin)
         >>> print(card.name)
         "Server Agent"
         >>> print(card.skills[0].name)
         "Price Fetching"
     """
-    logger.info(f"🔍 Discovering agent at address: {agent_address}")
+    logger.info(f"🔍 Discovering agent ID: {agent_id}")
 
-    # Step 1: Resolve address to domain via IdentityRegistry
+    # Step 1: Get tokenURI from IdentityRegistry (v1.0)
     try:
-        agent_data = identity_plugin.resolve_by_address(agent_address)
-        agent_id = agent_data["agentId"]
-        agent_domain = agent_data["agentDomain"]
+        token_uri = identity_plugin.token_uri(agent_id)
 
-        logger.info(
-            f"✅ Resolved address to domain: {agent_domain} (Agent ID: {agent_id})"
-        )
+        if not token_uri:
+            raise AgentNotFoundError(
+                f"Agent {agent_id} has no tokenURI set. "
+                f"Agent may not be fully registered or discovery info unavailable."
+            )
+
+        logger.info(f"✅ Found tokenURI: {token_uri}")
 
     except ContractCallError as e:
         raise AgentNotFoundError(
-            f"Agent not found in IdentityRegistry: {agent_address}"
+            f"Agent ID {agent_id} not found in IdentityRegistry"
         ) from e
 
-    # Step 2: Fetch AgentCard from domain
-    agent_card_json = await fetch_agent_card(agent_domain)
+    # Step 2: Extract domain from tokenURI and fetch AgentCard
+    # tokenURI format: http://{domain}/.well-known/agent-card.json
+    try:
+        # Parse domain from tokenURI
+        if "://" in token_uri:
+            # Remove protocol
+            domain_with_path = token_uri.split("://", 1)[1]
+            # Extract domain (everything before first /)
+            domain = domain_with_path.split("/", 1)[0]
+        else:
+            # Assume it's already just domain
+            domain = token_uri.split("/", 1)[0]
+
+        logger.debug(f"Extracted domain from tokenURI: {domain}")
+
+        # Fetch AgentCard from domain
+        agent_card_json = await fetch_agent_card(domain)
+
+    except Exception as e:
+        raise AgentCardFetchError(
+            f"Failed to fetch AgentCard from tokenURI '{token_uri}': {e}"
+        ) from e
 
     # Step 3: Parse AgentCard
     agent_card = parse_agent_card(agent_card_json)
 
-    logger.info(f"✅ Successfully discovered agent: {agent_card.name}")
+    logger.info(f"✅ Successfully discovered agent: {agent_card.name} (ID: {agent_id})")
 
     return agent_card
+
+
