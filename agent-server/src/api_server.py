@@ -21,8 +21,9 @@ from erc8004_common.utils import Web3Utility
 logger = logging.getLogger(__name__)
 
 
-# AgentCard file path
+# AgentCard and registration file paths
 AGENT_CARD_PATH = Path("/app/data/agent-card.json")
+AGENT_REGISTRATION_PATH = Path("/app/data/agent-registration.json")
 AGENT_STATE_PATH = Path("/app/data/agent_state.json")
 
 
@@ -178,6 +179,60 @@ def create_app(web3_utility: Optional[Web3Utility] = None) -> FastAPI:
             logger.error(f"Error reading AgentCard: {e}")
             raise HTTPException(status_code=500, detail="Internal server error")
 
+    @app.get(
+        "/agent.json",
+        tags=["ERC-8004"],
+        summary="Get Agent Registration (tokenURI)",
+        description="ERC-8004 v1.0 registration-v1 format for Identity Registry tokenURI",
+    )
+    async def get_agent_registration() -> JSONResponse:
+        """Serve ERC-8004 v1.0 registration metadata (registration-v1 format).
+
+        This endpoint serves the minimal registration metadata that the tokenURI
+        points to in the Identity Registry. It is separate from the full A2A agent
+        card and contains only essential identity and endpoint information.
+
+        Registration format includes:
+        - Agent name and description
+        - Endpoints (A2A card link, wallet addresses)
+        - Supported trust models (feedback, tee-attestation)
+        - Blockchain registrations (agentId, registry address)
+
+        Returns:
+            JSONResponse with registration-v1 format
+
+        Raises:
+            HTTPException: 404 if registration file not found
+            HTTPException: 500 if registration file is invalid
+        """
+        if not AGENT_REGISTRATION_PATH.exists():
+            logger.error(f"Agent registration not found at {AGENT_REGISTRATION_PATH}")
+            raise HTTPException(
+                status_code=404,
+                detail="Agent registration not found. Agent may not be registered yet.",
+            )
+
+        try:
+            with open(AGENT_REGISTRATION_PATH) as f:
+                registration = json.load(f)
+
+            return JSONResponse(
+                content=registration,
+                headers={
+                    "Cache-Control": "public, max-age=300",  # Cache for 5 minutes
+                    "Content-Type": "application/json",
+                },
+            )
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid registration JSON: {e}")
+            raise HTTPException(
+                status_code=500, detail="Registration file contains invalid JSON"
+            )
+        except Exception as e:
+            logger.error(f"Error reading registration: {e}")
+            raise HTTPException(status_code=500, detail="Internal server error")
+
     @app.get("/health", tags=["Health"], summary="Health check")
     async def health_check() -> dict[str, str]:
         """Health check endpoint for container orchestration.
@@ -306,6 +361,7 @@ def create_app(web3_utility: Optional[Web3Utility] = None) -> FastAPI:
             "version": "1.0.0",
             "protocol": "A2A v0.3.0",
             "endpoints": {
+                "registration": "/agent.json",
                 "agent_card": "/.well-known/agent-card.json",
                 "agent_info": "/api/v1/agent",
                 "price_skill": "/api/v1/skills/price",

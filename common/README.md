@@ -31,9 +31,11 @@ This package provides reusable infrastructure for building ERC-8004 compliant ag
   - Future: Query Sapphire network metadata for attestation verification
 - `get_rofl_metadata(agent_address)`: Get ROFL metadata for agent (**MOCK**)
   - Future: Retrieve attestation quote, signature chain, enclave measurements
-- Agent Discovery:
-  - `discover_agent()`: Resolve address → domain → AgentCard
-  - `fetch_agent_card()`: Fetch AgentCard from RFC 8615 endpoint
+- Agent Discovery (ERC-8004 v1.0):
+  - `discover_agent_by_id()`: Two-step discovery: tokenURI → registration JSON → agent card
+  - `fetch_registration_json()`: Fetch registration metadata from tokenURI
+  - `extract_agent_card_url()`: Extract A2A endpoint from registration
+  - `fetch_agent_card_from_url()`: Fetch AgentCard from full URL
   - `parse_agent_card()`: Parse and validate AgentCard JSON
 - Utility exceptions: `Web3UtilityError`, `ABILoadError`, `ConnectionError`, `SigningError`, `ROFLAttestationError`, `AgentDiscoveryError`
 

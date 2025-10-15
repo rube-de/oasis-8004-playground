@@ -1,9 +1,15 @@
 """Agent discovery utilities for ERC-8004 A2A protocol.
 
-Implements agent discovery workflow:
-1. Resolve blockchain address to domain via IdentityRegistry
-2. Fetch AgentCard from RFC 8615 compliant endpoint
-3. Parse and validate AgentCard structure
+Implements ERC-8004 v1.0 agent discovery workflow:
+1. Resolve agent ID to tokenURI via IdentityRegistry (points to registration JSON)
+2. Fetch registration JSON from tokenURI (/agent.json) - registration-v1 format
+3. Extract A2A endpoint from registration JSON
+4. Fetch AgentCard from A2A endpoint (/.well-known/agent-card.json)
+5. Parse and validate AgentCard structure
+
+This two-step process ensures proper separation between:
+- Registration metadata (minimal, for on-chain identity)
+- Agent card (full capabilities, for A2A protocol discovery)
 """
 
 import logging
@@ -49,32 +55,173 @@ class AgentCardParseError(AgentDiscoveryError):
     pass
 
 
-async def fetch_agent_card(domain: str, timeout: int = 10) -> dict[str, Any]:
-    """Fetch AgentCard from RFC 8615 compliant endpoint.
+async def fetch_registration_json(url: str, timeout: int = 10) -> dict[str, Any]:
+    """Fetch ERC-8004 registration JSON from tokenURI.
 
-    Fetches AgentCard from: http://{domain}/.well-known/agent-card.json
+    Fetches registration-v1 format from tokenURI endpoint.
+    This is the first step in the ERC-8004 v1.0 discovery workflow.
 
     Args:
-        domain: Agent domain (e.g., "agent.example.com" or "agent-server:8001")
+        url: Full tokenURI URL (e.g., "http://agent-server:80/agent.json")
         timeout: Request timeout in seconds (default: 10)
 
     Returns:
-        Parsed AgentCard as dictionary
+        Parsed registration JSON dictionary
 
     Raises:
         AgentCardFetchError: If fetch fails (network error, 404, timeout)
         AgentCardParseError: If response is not valid JSON
 
     Example:
-        >>> card = await fetch_agent_card("agent.example.com")
+        >>> registration = await fetch_registration_json("http://domain/agent.json")
+        >>> print(registration["type"])
+        "https://eips.ethereum.org/EIPS/eip-8004#registration-v1"
+    """
+    logger.debug(f"Fetching registration JSON from: {url}")
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.get(url)
+
+            # Check for HTTP errors
+            if response.status_code == 404:
+                raise AgentCardFetchError(
+                    f"Registration metadata not found at {url} (404). "
+                    f"Agent may not be registered or tokenURI is incorrect."
+                )
+
+            response.raise_for_status()
+
+            # Parse JSON
+            try:
+                registration_json = response.json()
+                logger.debug(
+                    f"Successfully fetched registration JSON: "
+                    f"type={registration_json.get('type', 'unknown')}"
+                )
+                return registration_json
+
+            except Exception as e:
+                raise AgentCardParseError(
+                    f"Invalid JSON in registration response from {url}: {e}"
+                ) from e
+
+    except httpx.TimeoutException as e:
+        raise AgentCardFetchError(
+            f"Timeout fetching registration from {url} (timeout={timeout}s)"
+        ) from e
+
+    except httpx.NetworkError as e:
+        raise AgentCardFetchError(
+            f"Network error fetching registration from {url}: {e}. "
+            f"Check that the URL is reachable."
+        ) from e
+
+    except httpx.HTTPStatusError as e:
+        raise AgentCardFetchError(
+            f"HTTP error fetching registration from {url}: {e.response.status_code}"
+        ) from e
+
+    except AgentCardFetchError:
+        # Re-raise our custom exceptions
+        raise
+
+    except Exception as e:
+        raise AgentCardFetchError(
+            f"Unexpected error fetching registration: {e}"
+        ) from e
+
+
+def extract_agent_card_url(registration_json: dict[str, Any]) -> str:
+    """Extract agent card URL from registration JSON.
+
+    Parses registration-v1 format and finds the A2A endpoint.
+    This is the second step in the ERC-8004 v1.0 discovery workflow.
+
+    Args:
+        registration_json: Parsed registration JSON (registration-v1 format)
+
+    Returns:
+        Agent card URL (e.g., "http://domain/.well-known/agent-card.json")
+
+    Raises:
+        AgentCardParseError: If A2A endpoint not found or registration format invalid
+
+    Example:
+        >>> registration = {
+        ...     "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+        ...     "endpoints": [
+        ...         {"name": "A2A", "endpoint": "http://domain/.well-known/agent-card.json"},
+        ...         {"name": "agentWallet-Sepolia", "endpoint": "eip155:11155111:0x..."}
+        ...     ]
+        ... }
+        >>> url = extract_agent_card_url(registration)
+        >>> print(url)
+        'http://domain/.well-known/agent-card.json'
+    """
+    try:
+        endpoints = registration_json.get("endpoints", [])
+
+        if not endpoints:
+            raise AgentCardParseError(
+                "Registration JSON missing 'endpoints' field. "
+                "Cannot discover agent card URL."
+            )
+
+        # Find endpoint with name="A2A"
+        for endpoint in endpoints:
+            if endpoint.get("name") == "A2A":
+                agent_card_url = endpoint.get("endpoint")
+
+                if not agent_card_url:
+                    raise AgentCardParseError(
+                        "A2A endpoint found but 'endpoint' field is missing or empty"
+                    )
+
+                logger.debug(f"Extracted A2A endpoint: {agent_card_url}")
+                return agent_card_url
+
+        # No A2A endpoint found
+        endpoint_names = [ep.get("name", "unknown") for ep in endpoints]
+        raise AgentCardParseError(
+            f"No A2A endpoint found in registration metadata. "
+            f"Available endpoints: {endpoint_names}. "
+            f"Registration may be incomplete or malformed."
+        )
+
+    except AgentCardParseError:
+        # Re-raise our custom exceptions
+        raise
+
+    except Exception as e:
+        raise AgentCardParseError(
+            f"Failed to extract agent card URL from registration: {e}"
+        ) from e
+
+
+async def fetch_agent_card_from_url(url: str, timeout: int = 10) -> dict[str, Any]:
+    """Fetch AgentCard from full URL.
+
+    Fetches AgentCard directly from a complete URL.
+    This is the third step in the ERC-8004 v1.0 discovery workflow.
+
+    Args:
+        url: Full agent card URL (e.g., "http://domain/.well-known/agent-card.json")
+        timeout: Request timeout in seconds (default: 10)
+
+    Returns:
+        Parsed AgentCard dictionary
+
+    Raises:
+        AgentCardFetchError: If fetch fails (network error, 404, timeout)
+        AgentCardParseError: If response is not valid JSON
+
+    Example:
+        >>> card = await fetch_agent_card_from_url("http://domain/.well-known/agent-card.json")
         >>> print(card["name"])
         "My Agent"
     """
-    # Construct RFC 8615 compliant URL
-    # Use http:// for Docker internal communication
-    url = f"http://{domain}/.well-known/agent-card.json"
-
-    logger.debug(f"Fetching AgentCard from: {url}")
+    logger.debug(f"Fetching AgentCard from URL: {url}")
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
@@ -84,7 +231,7 @@ async def fetch_agent_card(domain: str, timeout: int = 10) -> dict[str, Any]:
             if response.status_code == 404:
                 raise AgentCardFetchError(
                     f"AgentCard not found at {url} (404). "
-                    f"Agent may not be registered or domain is incorrect."
+                    f"Agent may not have published their agent card yet."
                 )
 
             response.raise_for_status()
@@ -92,7 +239,9 @@ async def fetch_agent_card(domain: str, timeout: int = 10) -> dict[str, Any]:
             # Parse JSON
             try:
                 agent_card = response.json()
-                logger.debug(f"Successfully fetched AgentCard from {domain}")
+                logger.debug(
+                    f"Successfully fetched AgentCard: name={agent_card.get('name', 'unknown')}"
+                )
                 return agent_card
 
             except Exception as e:
@@ -107,8 +256,7 @@ async def fetch_agent_card(domain: str, timeout: int = 10) -> dict[str, Any]:
 
     except httpx.NetworkError as e:
         raise AgentCardFetchError(
-            f"Network error fetching AgentCard from {url}: {e}. "
-            f"Check that the domain is reachable and agent is running."
+            f"Network error fetching AgentCard from {url}: {e}"
         ) from e
 
     except httpx.HTTPStatusError as e:
@@ -121,7 +269,9 @@ async def fetch_agent_card(domain: str, timeout: int = 10) -> dict[str, Any]:
         raise
 
     except Exception as e:
-        raise AgentCardFetchError(f"Unexpected error fetching AgentCard: {e}") from e
+        raise AgentCardFetchError(
+            f"Unexpected error fetching AgentCard: {e}"
+        ) from e
 
 
 def parse_agent_card(agent_card_json: dict[str, Any]) -> AgentCard:
@@ -233,12 +383,14 @@ async def discover_agent_by_id(
     agent_id: int,
     identity_plugin: IdentityRegistryPlugin,
 ) -> AgentCard:
-    """Discover agent by ID using v1.0 tokenURI-based flow.
+    """Discover agent by ID using v1.0 two-step tokenURI flow.
 
     ERC-8004 v1.0 discovery workflow:
-    1. Get tokenURI from IdentityRegistry (points to AgentCard URL)
-    2. Fetch AgentCard from tokenURI
-    3. Parse and validate AgentCard
+    1. Get tokenURI from IdentityRegistry (points to registration JSON)
+    2. Fetch registration JSON from tokenURI (/agent.json)
+    3. Extract A2A endpoint from registration JSON
+    4. Fetch AgentCard from A2A endpoint (/.well-known/agent-card.json)
+    5. Parse and validate AgentCard
 
     Args:
         agent_id: Agent ID from IdentityRegistry
@@ -249,8 +401,8 @@ async def discover_agent_by_id(
 
     Raises:
         AgentNotFoundError: If agent ID doesn't exist
-        AgentCardFetchError: If fetching AgentCard fails
-        AgentCardParseError: If AgentCard parsing fails
+        AgentCardFetchError: If fetching registration or AgentCard fails
+        AgentCardParseError: If parsing fails or A2A endpoint missing
 
     Example:
         >>> plugin = IdentityRegistryPlugin(web3_utility, config)
@@ -263,7 +415,7 @@ async def discover_agent_by_id(
     """
     logger.info(f"🔍 Discovering agent ID: {agent_id}")
 
-    # Step 1: Get tokenURI from IdentityRegistry (v1.0)
+    # Step 1: Get tokenURI from IdentityRegistry
     try:
         token_uri = identity_plugin.token_uri(agent_id)
 
@@ -273,40 +425,64 @@ async def discover_agent_by_id(
                 f"Agent may not be fully registered or discovery info unavailable."
             )
 
-        logger.info(f"✅ Found tokenURI: {token_uri}")
+        logger.info(f"✅ Step 1: Found tokenURI: {token_uri}")
 
     except ContractCallError as e:
         raise AgentNotFoundError(
             f"Agent ID {agent_id} not found in IdentityRegistry"
         ) from e
 
-    # Step 2: Extract domain from tokenURI and fetch AgentCard
-    # tokenURI format: http://{domain}/.well-known/agent-card.json
+    # Step 2: Fetch registration JSON from tokenURI
     try:
-        # Parse domain from tokenURI
-        if "://" in token_uri:
-            # Remove protocol
-            domain_with_path = token_uri.split("://", 1)[1]
-            # Extract domain (everything before first /)
-            domain = domain_with_path.split("/", 1)[0]
-        else:
-            # Assume it's already just domain
-            domain = token_uri.split("/", 1)[0]
-
-        logger.debug(f"Extracted domain from tokenURI: {domain}")
-
-        # Fetch AgentCard from domain
-        agent_card_json = await fetch_agent_card(domain)
+        logger.debug(f"Step 2: Fetching registration JSON from tokenURI")
+        registration_json = await fetch_registration_json(token_uri)
+        logger.info(
+            f"✅ Step 2: Fetched registration JSON "
+            f"(type: {registration_json.get('type', 'unknown')})"
+        )
 
     except Exception as e:
         raise AgentCardFetchError(
-            f"Failed to fetch AgentCard from tokenURI '{token_uri}': {e}"
+            f"Failed to fetch registration from tokenURI '{token_uri}': {e}"
         ) from e
 
-    # Step 3: Parse AgentCard
-    agent_card = parse_agent_card(agent_card_json)
+    # Step 3: Extract A2A endpoint from registration
+    try:
+        logger.debug(f"Step 3: Extracting A2A endpoint from registration")
+        agent_card_url = extract_agent_card_url(registration_json)
+        logger.info(f"✅ Step 3: Extracted A2A endpoint: {agent_card_url}")
 
-    logger.info(f"✅ Successfully discovered agent: {agent_card.name} (ID: {agent_id})")
+    except Exception as e:
+        raise AgentCardParseError(
+            f"Failed to extract A2A endpoint from registration: {e}"
+        ) from e
+
+    # Step 4: Fetch AgentCard from A2A endpoint
+    try:
+        logger.debug(f"Step 4: Fetching AgentCard from A2A endpoint")
+        agent_card_json = await fetch_agent_card_from_url(agent_card_url)
+        logger.info(
+            f"✅ Step 4: Fetched AgentCard "
+            f"(name: {agent_card_json.get('name', 'unknown')})"
+        )
+
+    except Exception as e:
+        raise AgentCardFetchError(
+            f"Failed to fetch AgentCard from A2A endpoint '{agent_card_url}': {e}"
+        ) from e
+
+    # Step 5: Parse AgentCard
+    try:
+        logger.debug(f"Step 5: Parsing AgentCard structure")
+        agent_card = parse_agent_card(agent_card_json)
+        logger.info(
+            f"✅ Step 5: Successfully discovered agent: {agent_card.name} (ID: {agent_id})"
+        )
+
+    except Exception as e:
+        raise AgentCardParseError(
+            f"Failed to parse AgentCard: {e}"
+        ) from e
 
     return agent_card
 

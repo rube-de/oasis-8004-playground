@@ -15,6 +15,7 @@ from typing import Optional, Dict, Any
 from .config import Config
 from . import api_server
 from erc8004_common.utils.agent_card import generate_agent_card
+from erc8004_common.utils.agent_metadata import build_erc8004_registration_with_config
 from erc8004_common.utils import Web3Utility, Web3UtilityError
 from erc8004_common.plugins.identity_registry import IdentityRegistryPlugin
 from erc8004_common.plugins.base import (
@@ -52,6 +53,7 @@ class Agent:
     STATE_DIR = Path("/app/data")
     STATE_FILE = STATE_DIR / "agent_state.json"
     AGENT_CARD_FILE = STATE_DIR / "agent-card.json"
+    AGENT_REGISTRATION_FILE = STATE_DIR / "agent-registration.json"
     HEARTBEAT_INTERVAL = 60  # seconds
 
     def __init__(self):
@@ -155,12 +157,12 @@ class Agent:
         # (no reverse mapping from address → agentId in v1.0)
         # Rely on persisted state; contract will revert if already registered
 
-        # Execute registration with tokenURI pointing to AgentCard
+        # Execute registration with tokenURI pointing to registration-v1 format
         logger.info("No existing registration found. Starting registration workflow...")
 
         try:
-            # v1.0: tokenURI should point to RFC 8615 compliant AgentCard endpoint
-            token_uri = f"http://{self.config.agent_domain}/.well-known/agent-card.json"
+            # v1.0: tokenURI should point to ERC-8004 registration-v1 format at /agent.json
+            token_uri = f"http://{self.config.agent_domain}/agent.json"
 
             logger.info(f"Registering with tokenURI: {token_uri}")
             self.agent_id = self.identity_plugin.register(token_uri=token_uri)
@@ -176,7 +178,8 @@ class Agent:
             # Persist state
             self._save_state()
 
-            # Generate and save AgentCard
+            # Generate and save both registration JSON (for tokenURI) and AgentCard (for A2A)
+            self.generate_and_save_registration_json()
             self.generate_and_save_agent_card()
 
             return self.agent_id
@@ -317,6 +320,58 @@ class Agent:
 
         return health
 
+    def generate_and_save_registration_json(self) -> None:
+        """Generate ERC-8004 registration-v1 format and save to disk.
+
+        Creates registration metadata for tokenURI with minimal identity information,
+        endpoints, and supported trust models. This is separate from the full A2A
+        agent card and follows the ERC-8004 v1.0 registration-v1 format.
+
+        Saves to agent-registration.json in data directory for serving at /agent.json.
+
+        Raises:
+            AgentError: If registration generation or save fails
+        """
+        if not self.agent_id:
+            raise AgentError("Cannot generate registration: agent not registered")
+
+        if not self.config:
+            raise AgentError("Cannot generate registration: config not loaded")
+
+        if not self.web3_utility or not self.web3_utility.account:
+            raise AgentError("Cannot generate registration: Web3 utility not initialized")
+
+        try:
+            # Get chain ID from Web3 connection
+            chain_id = self.web3_utility.w3.eth.chain_id
+
+            # Build registration using config-aware helper
+            registration = build_erc8004_registration_with_config(
+                agent_domain=self.config.agent_domain,
+                agent_address=self.web3_utility.account.address,
+                chain_id=chain_id,
+                identity_registry_address=self.config.identity_registry_address,
+                agent_id=self.agent_id,
+                config=self.config,
+                protocol="http",  # TODO: Use https in production
+            )
+
+            # Ensure data directory exists
+            self.STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+            # Save registration to JSON file
+            with open(self.AGENT_REGISTRATION_FILE, "w") as f:
+                json.dump(registration, f, indent=2)
+
+            logger.info(f"✓ Registration JSON saved to {self.AGENT_REGISTRATION_FILE}")
+            logger.debug(
+                f"Registration: type={registration['type']}, "
+                f"supportedTrust={registration['supportedTrust']}"
+            )
+
+        except Exception as e:
+            raise AgentError(f"Failed to generate registration: {e}") from e
+
     def generate_and_save_agent_card(self) -> None:
         """Generate A2A and ERC-8004 compliant AgentCard and save to disk.
 
@@ -401,10 +456,13 @@ class Agent:
                 f"✓ API server started successfully on http://0.0.0.0:{port}"
             )
             logger.info(
-                f"  AgentCard: http://localhost:{port}/.well-known/agent-card.json"
+                f"  Registration (tokenURI): http://localhost:{port}/agent.json"
             )
             logger.info(
-                f"  Health: http://localhost:{port}/health"
+                f"  AgentCard (A2A):         http://localhost:{port}/.well-known/agent-card.json"
+            )
+            logger.info(
+                f"  Health:                  http://localhost:{port}/health"
             )
 
         except Exception as e:

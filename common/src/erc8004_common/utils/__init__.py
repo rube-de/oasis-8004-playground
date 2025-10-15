@@ -12,7 +12,9 @@ from .web3_utility import (
 )
 from .agent_discovery import (
     discover_agent_by_id,
-    fetch_agent_card,
+    fetch_registration_json,
+    extract_agent_card_url,
+    fetch_agent_card_from_url,
     parse_agent_card,
     AgentDiscoveryError,
     AgentNotFoundError,
@@ -35,6 +37,13 @@ from .rofl_key_manager import (
     RoflKeyManager,
     RoflKeyManagerError,
 )
+from .agent_metadata import (
+    get_chain_name,
+    format_caip10_address,
+    build_erc8004_registration,
+    build_erc8004_registration_with_config,
+    CHAIN_NAMES,
+)
 
 __all__ = [
     "ABILoadError",
@@ -43,7 +52,9 @@ __all__ = [
     "Web3Utility",
     "Web3UtilityError",
     "discover_agent_by_id",
-    "fetch_agent_card",
+    "fetch_registration_json",
+    "extract_agent_card_url",
+    "fetch_agent_card_from_url",
     "parse_agent_card",
     "AgentDiscoveryError",
     "AgentNotFoundError",
@@ -59,4 +70,9 @@ __all__ = [
     "AddressFormatError",
     "RoflKeyManager",
     "RoflKeyManagerError",
+    "get_chain_name",
+    "format_caip10_address",
+    "build_erc8004_registration",
+    "build_erc8004_registration_with_config",
+    "CHAIN_NAMES",
 ]
