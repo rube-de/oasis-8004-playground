@@ -15,8 +15,7 @@ from typing import Optional, Dict, Any
 from .config import Config
 from . import api_server
 from .skills import call_verified_skill, get_verified_price, VerifiedCallError
-from erc8004_common.utils.agent_card import generate_agent_card
-from erc8004_common.utils import Web3Utility, Web3UtilityError
+from erc8004_common.utils import AgentCardBuilder, Web3Utility, Web3UtilityError
 from erc8004_common.plugins import (
     IdentityRegistryPlugin,
     ReputationRegistryPlugin,
@@ -592,17 +591,27 @@ class Agent:
             # Get chain ID from Web3 connection
             chain_id = self.web3_utility.w3.eth.chain_id
 
-            # Generate AgentCard
-            agent_card = generate_agent_card(
+            # Build AgentCard using builder pattern with agent_config.json
+            builder = AgentCardBuilder(
                 agent_id=self.agent_id,
                 agent_address=self.web3_utility.account.address,
                 agent_domain=self.config.agent_domain,
                 chain_id=chain_id,
                 account=self.web3_utility.account,
-                name=getattr(self.config, "agent_name", None),
-                description=getattr(self.config, "agent_description", None),
-                version=getattr(self.config, "agent_version", "1.0.0"),
             )
+
+            # Override trust models and infrastructure for local mode
+            if self.config.use_local_mode:
+                logger.debug("Local mode detected, disabling TEE trust model")
+                builder.override_trust_models(["feedback"])
+                builder.override_infrastructure(
+                    hosting="local",
+                    tee_enabled=False,
+                    attestation_provider=None,
+                )
+
+            # Build final AgentCard from config + runtime state
+            agent_card = builder.build()
 
             # Ensure data directory exists
             self.STATE_DIR.mkdir(parents=True, exist_ok=True)

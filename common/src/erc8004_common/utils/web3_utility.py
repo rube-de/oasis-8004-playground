@@ -10,6 +10,7 @@ Provides comprehensive Web3 abstraction layer:
 Use contract.functions.myFunction().transact() for transactions.
 """
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -18,6 +19,7 @@ from typing import Optional, Any
 from eth_account import Account
 from eth_account.messages import encode_defunct
 from eth_account.signers.local import LocalAccount
+from oasis_rofl_client import RoflClient
 from web3 import Web3
 from web3.contract import Contract
 from web3.middleware import SignAndSendRawMiddlewareBuilder
@@ -129,38 +131,28 @@ class Web3Utility:
             # ROFL mode (default): generate/retrieve key from ROFL
             logger.info("🔒 ROFL MODE: Using TEE key generation")
 
-            from .rofl_key_manager import RoflKeyManager, RoflKeyManagerError
-
-            try:
-                # Use agent_domain as key_id for ROFL key generation
-                if not hasattr(self.config, 'agent_domain'):
-                    raise Web3UtilityError(
-                        "ROFL mode requires agent_domain to be configured. "
-                        "Set AGENT_DOMAIN in environment."
-                    )
-
-                key_id = self.config.agent_domain
-                socket_path = getattr(self.config, 'rofl_socket_path', '/run/rofl-appd.sock')
-
-                logger.info(f"Generating/retrieving ROFL key: key_id={key_id}")
-
-                private_key = RoflKeyManager.generate_or_get_key_sync(
-                    key_id=key_id,
-                    socket_path=socket_path
+            if not self.config.rofl_key_id:
+                raise Web3UtilityError(
+                    "ROFL mode requires rofl_key_id to be configured. "
+                    "Set ROFL_KEY_ID in environment."
                 )
 
-                logger.info(f"✓ ROFL key retrieved successfully: key_id={key_id}")
-                return private_key
+            try:
+                logger.info(f"Generating/retrieving ROFL key: key_id={self.config.rofl_key_id}")
 
-            except RoflKeyManagerError as e:
-                raise Web3UtilityError(
-                    f"ROFL key generation failed: {e}. "
-                    f"Ensure ROFL service (rofl-appd) is running and socket is accessible."
-                ) from e
+                # Use RoflClient with defaults
+                client = RoflClient()
+                key_hex = asyncio.run(client.generate_key(self.config.rofl_key_id))
+
+                # Normalize key format (remove 0x prefix if present)
+                if key_hex.startswith("0x"):
+                    key_hex = key_hex[2:]
+
+                logger.info(f"✓ ROFL key retrieved: key_id={self.config.rofl_key_id}")
+                return key_hex
+
             except Exception as e:
-                raise Web3UtilityError(
-                    f"Unexpected error during ROFL key generation: {e}"
-                ) from e
+                raise Web3UtilityError(f"ROFL key generation failed: {e}") from e
 
     def _add_signing_middleware(self, private_key: str) -> None:
         """Add transaction signing middleware to Web3 instance.

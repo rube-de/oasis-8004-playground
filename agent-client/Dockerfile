@@ -29,6 +29,9 @@ RUN uv sync --frozen --no-dev
 # Copy application source code
 COPY agent-client/src/ /app/src/
 
+# Copy agent configuration
+COPY agent-client/agent_config.json /app/agent_config.json
+
 # Create non-root user for security
 RUN useradd -m -u 1000 -s /bin/bash agent && \
     chown -R agent:agent /app

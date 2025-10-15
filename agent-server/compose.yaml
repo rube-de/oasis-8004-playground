@@ -20,7 +20,7 @@ services:
     # Expose API server port
     # Maps host port 8001 to container port 80 (default API_PORT in production)
     ports:
-      - "8001:80"
+      - "8001:8001"
 
     # Restart policy for long-running container
     restart: unless-stopped

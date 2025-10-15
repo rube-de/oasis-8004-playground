@@ -14,9 +14,8 @@ from typing import Optional, Dict, Any
 
 from .config import Config
 from . import api_server
-from erc8004_common.utils.agent_card import generate_agent_card
+from erc8004_common.utils import AgentCardBuilder, Web3Utility, Web3UtilityError
 from erc8004_common.utils.agent_metadata import build_erc8004_registration_with_config
-from erc8004_common.utils import Web3Utility, Web3UtilityError
 from erc8004_common.plugins.identity_registry import IdentityRegistryPlugin
 from erc8004_common.plugins.base import (
     PluginInitializationError,
@@ -162,7 +161,11 @@ class Agent:
 
         try:
             # v1.0: tokenURI should point to ERC-8004 registration-v1 format at /agent.json
-            token_uri = f"http://{self.config.agent_domain}/agent.json"
+            # Local mode: http with port, ROFL mode: https without port
+            if self.config.use_local_mode:
+                token_uri = f"http://{self.config.agent_domain}:{self.config.api_port}/agent.json"
+            else:
+                token_uri = f"https://{self.config.agent_domain}/agent.json"
 
             logger.info(f"Registering with tokenURI: {token_uri}")
             self.agent_id = self.identity_plugin.register(token_uri=token_uri)
@@ -346,6 +349,9 @@ class Agent:
             chain_id = self.web3_utility.w3.eth.chain_id
 
             # Build registration using config-aware helper
+            # Local mode: http with port, ROFL mode: https without port
+            protocol = "http" if self.config.use_local_mode else "https"
+
             registration = build_erc8004_registration_with_config(
                 agent_domain=self.config.agent_domain,
                 agent_address=self.web3_utility.account.address,
@@ -353,7 +359,7 @@ class Agent:
                 identity_registry_address=self.config.identity_registry_address,
                 agent_id=self.agent_id,
                 config=self.config,
-                protocol="http",  # TODO: Use https in production
+                protocol=protocol,
             )
 
             # Ensure data directory exists
@@ -395,17 +401,27 @@ class Agent:
             # Get chain ID from Web3 connection
             chain_id = self.web3_utility.w3.eth.chain_id
 
-            # Generate AgentCard
-            agent_card = generate_agent_card(
+            # Build AgentCard using builder pattern with agent_config.json
+            builder = AgentCardBuilder(
                 agent_id=self.agent_id,
                 agent_address=self.web3_utility.account.address,
                 agent_domain=self.config.agent_domain,
                 chain_id=chain_id,
                 account=self.web3_utility.account,
-                name=getattr(self.config, "agent_name", None),
-                description=getattr(self.config, "agent_description", None),
-                version=getattr(self.config, "agent_version", "1.0.0"),
             )
+
+            # Override trust models and infrastructure for local mode
+            if self.config.use_local_mode:
+                logger.debug("Local mode detected, disabling TEE trust model")
+                builder.override_trust_models(["feedback"])
+                builder.override_infrastructure(
+                    hosting="local",
+                    tee_enabled=False,
+                    attestation_provider=None,
+                )
+
+            # Build final AgentCard from config + runtime state
+            agent_card = builder.build()
 
             # Ensure data directory exists
             self.STATE_DIR.mkdir(parents=True, exist_ok=True)

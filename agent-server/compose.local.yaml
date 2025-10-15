@@ -29,7 +29,7 @@ services:
 
     # Expose API server port (8001 for local development)
     ports:
-      - "8001:80"
+      - "8001:8001"
 
     # Restart policy for local development
     restart: unless-stopped

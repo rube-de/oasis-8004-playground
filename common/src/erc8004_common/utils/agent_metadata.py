@@ -119,6 +119,7 @@ def build_erc8004_registration(
     agent_id: Optional[int] = None,
     use_rofl: bool = False,
     protocol: str = "http",
+    port: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Build ERC-8004 v1.0 registration-v1 format for tokenURI.
 
@@ -141,6 +142,7 @@ def build_erc8004_registration(
         agent_id: Agent ID from registry (None if not yet registered)
         use_rofl: Whether agent uses ROFL/TEE (affects supportedTrust)
         protocol: Protocol for endpoints (http or https)
+        port: Optional port for endpoints (None for standard 80/443)
 
     Returns:
         Dictionary with registration-v1 format, ready for JSON serialization
@@ -163,9 +165,16 @@ def build_erc8004_registration(
     endpoints: List[Dict[str, Any]] = []
 
     # 1. A2A endpoint (points to agent-card.json for full discovery)
+    # Local mode (port provided): use http with port
+    # ROFL mode (no port): use https without port
+    if port is not None:
+        a2a_url = f"http://{agent_domain}:{port}/.well-known/agent-card.json"
+    else:
+        a2a_url = f"https://{agent_domain}/.well-known/agent-card.json"
+
     endpoints.append({
         "name": "A2A",
-        "endpoint": f"{protocol}://{agent_domain}/.well-known/agent-card.json",
+        "endpoint": a2a_url,
         "version": "0.3.0"
     })
 
@@ -258,6 +267,9 @@ def build_erc8004_registration_with_config(
     # Determine if ROFL is being used (inverse of use_local_mode)
     use_rofl = not getattr(config, "use_local_mode", False)
 
+    # Pass port for local mode (http with port), None for ROFL mode (https without port)
+    port = getattr(config, "api_port", None) if getattr(config, "use_local_mode", False) else None
+
     return build_erc8004_registration(
         agent_domain=agent_domain,
         agent_address=agent_address,
@@ -268,4 +280,5 @@ def build_erc8004_registration_with_config(
         agent_id=agent_id,
         use_rofl=use_rofl,
         protocol=protocol,
+        port=port,
     )

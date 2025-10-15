@@ -1,0 +1,89 @@
+{
+  "name": "Oasis ERC-8004 Agent",
+  "description": "ERC-8004 compliant autonomous agent with ROFL TEE attestation",
+  "version": "1.0.0",
+  "protocolVersion": "0.3.0",
+  "provider": {
+    "organization": "Oasis Protocol",
+    "url": "https://oasisprotocol.org"
+  },
+  "supportedTrust": ["feedback", "tee-attestation"],
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false,
+    "stateTransitionHistory": true,
+    "extensions": [
+      {
+        "uri": "https://erc8004.ethereum.org/extensions/validation",
+        "description": "ERC-8004 Validation Registry support",
+        "required": false,
+        "params": {}
+      }
+    ]
+  },
+  "skills": [
+    {
+      "id": "identity.register",
+      "name": "Identity Registration",
+      "description": "Register agent in ERC-8004 Identity Registry",
+      "tags": ["identity", "registration", "blockchain"],
+      "inputModes": ["text"],
+      "outputModes": ["text"]
+    },
+    {
+      "id": "identity.resolve",
+      "name": "Identity Resolution",
+      "description": "Resolve agent identities by ID, address, or domain",
+      "tags": ["identity", "discovery", "blockchain"],
+      "inputModes": ["text"],
+      "outputModes": ["text"]
+    },
+    {
+      "id": "price.fetch",
+      "name": "Cryptocurrency Price Fetching",
+      "description": "Fetch real-time cryptocurrency prices from Binance",
+      "tags": ["price", "cryptocurrency", "binance", "market-data"],
+      "inputModes": ["text"],
+      "outputModes": ["text", "json"]
+    }
+  ],
+  "defaultInputModes": ["text"],
+  "defaultOutputModes": ["text", "json"],
+  "infrastructure": {
+    "hosting": "oasis-sapphire",
+    "teeEnabled": true,
+    "attestationProvider": "rofl"
+  },
+  "endpoints": {
+    "a2a": {
+      "enabled": true,
+      "version": "0.3.0"
+    },
+    "mcp": {
+      "enabled": false,
+      "version": "2025-06-18"
+    }
+  },
+  "evmChains": [
+    {
+      "name": "Ethereum-Sepolia",
+      "chainId": 11155111
+    },
+    {
+      "name": "Base-Sepolia",
+      "chainId": 84532
+    },
+    {
+      "name": "Optimism-Sepolia",
+      "chainId": 11155420
+    },
+    {
+      "name": "Oasis-Sapphire-Testnet",
+      "chainId": 23295
+    },
+    {
+      "name": "Hardhat-Local",
+      "chainId": 31337
+    }
+  ]
+}

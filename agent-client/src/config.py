@@ -23,9 +23,11 @@ class Config(BaseConfig):
 
     Optional Registration Configuration (v1.0):
         - AGENT_TOKEN_URI: TokenURI for registration (IPFS/HTTPS, optional)
-        - AGENT_NAME: Custom agent name for registration/AgentCard (default: auto-generated)
-        - AGENT_DESCRIPTION: Custom agent description for registration/AgentCard
-        - AGENT_VERSION: Agent version for AgentCard (default: "1.0.0")
+
+    Agent Metadata Configuration:
+        Agent metadata (name, description, skills, capabilities) is configured in
+        agent_config.json (not environment variables). This separates static agent
+        configuration from runtime environment settings.
 
     Optional API Server Configuration:
         - API_PORT: Port for AgentCard API server (default: 80)
@@ -66,21 +68,8 @@ class Config(BaseConfig):
         description="Agent tokenURI for registration (IPFS/HTTPS URI, optional)",
     )
 
-    # Optional AgentCard customization fields
-    agent_name: str | None = Field(
-        default=None,
-        description="Custom agent name for AgentCard and registration (defaults to auto-generated)",
-    )
-
-    agent_description: str | None = Field(
-        default=None,
-        description="Custom agent description for AgentCard and registration",
-    )
-
-    agent_version: str = Field(
-        default="1.0.0",
-        description="Agent version for AgentCard (semantic versioning)",
-    )
+    # Agent metadata (name, description, skills, capabilities) is now configured
+    # in agent_config.json (not environment variables)
 
     # API server configuration
     api_port: int = Field(

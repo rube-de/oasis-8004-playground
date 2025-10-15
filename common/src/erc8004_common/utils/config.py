@@ -22,7 +22,7 @@ class BaseConfig(BaseSettings):
         - GAS_MULTIPLIER: Gas estimation safety multiplier (default: 1.2)
         - TX_TIMEOUT: Transaction confirmation timeout in seconds (default: 120)
         - USE_LOCAL_MODE: Use local private key mode for development (default: False = ROFL mode)
-        - ROFL_SOCKET_PATH: Path to ROFL socket for key generation (default: /run/rofl-appd.sock)
+        - ROFL_KEY_ID: Key ID for ROFL key generation (required in ROFL mode)
 
     Deployment Modes:
         - ROFL Mode (default): Keys generated securely in TEE via ROFL client
@@ -91,9 +91,9 @@ class BaseConfig(BaseSettings):
         description="Use local private key mode (development only). Default: False (ROFL mode)",
     )
 
-    rofl_socket_path: str = Field(
-        default="/run/rofl-appd.sock",
-        description="Path to ROFL Unix socket for TEE key generation",
+    rofl_key_id: Optional[str] = Field(
+        default=None,
+        description="Key ID for ROFL key generation (required in ROFL mode)",
     )
 
     @field_validator("identity_registry_address", "reputation_registry_address", "validation_registry_address")

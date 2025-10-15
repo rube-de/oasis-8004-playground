@@ -33,16 +33,16 @@ from .address import (
     to_caip10,
     AddressFormatError,
 )
-from .rofl_key_manager import (
-    RoflKeyManager,
-    RoflKeyManagerError,
-)
 from .agent_metadata import (
     get_chain_name,
     format_caip10_address,
     build_erc8004_registration,
     build_erc8004_registration_with_config,
     CHAIN_NAMES,
+)
+from .agent_card_builder import (
+    AgentCardBuilder,
+    AgentConfigError,
 )
 
 __all__ = [
@@ -68,11 +68,11 @@ __all__ = [
     "parse_caip10",
     "to_caip10",
     "AddressFormatError",
-    "RoflKeyManager",
-    "RoflKeyManagerError",
     "get_chain_name",
     "format_caip10_address",
     "build_erc8004_registration",
     "build_erc8004_registration_with_config",
     "CHAIN_NAMES",
+    "AgentCardBuilder",
+    "AgentConfigError",
 ]

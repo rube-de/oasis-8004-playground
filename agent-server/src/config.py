@@ -24,13 +24,11 @@ class Config(BaseConfig):
     Local Mode Only (development):
         - PRIVATE_KEY: Private key for transaction signing (without 0x prefix)
 
-    Optional AgentCard Customization:
-        - AGENT_NAME: Custom agent name for AgentCard (default: auto-generated)
-        - AGENT_DESCRIPTION: Custom agent description for AgentCard
-        - AGENT_VERSION: Agent version for AgentCard (default: "1.0.0")
-
     Optional API Server Configuration:
         - API_PORT: Port for AgentCard API server (default: 80 for Docker)
+
+    Note:
+        - Agent metadata (name, description, skills) configured in agent_config.json
 
     Inherited from BaseConfig:
         - RPC_URL: Ethereum RPC endpoint URL
@@ -62,22 +60,6 @@ class Config(BaseConfig):
     agent_domain: str = Field(
         ...,
         description="Domain for agent registration (RFC 8615). Also used as ROFL key-id in production.",
-    )
-
-    # Optional AgentCard customization fields
-    agent_name: str | None = Field(
-        default=None,
-        description="Custom agent name for AgentCard (defaults to 'ERC-8004 Agent {id}')",
-    )
-
-    agent_description: str | None = Field(
-        default=None,
-        description="Custom agent description for AgentCard",
-    )
-
-    agent_version: str = Field(
-        default="1.0.0",
-        description="Agent version for AgentCard (semantic versioning)",
     )
 
     # API server configuration (default port 80 for Docker)

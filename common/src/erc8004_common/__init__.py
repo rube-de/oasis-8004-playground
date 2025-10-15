@@ -9,7 +9,6 @@ Shared components for ERC-8004 agent implementations including:
 
 from .utils.agent_card import (
     AgentCard,
-    generate_agent_card,
     sign_agent_registration,
     format_caip10_address,
     Provider,
@@ -18,12 +17,13 @@ from .utils.agent_card import (
     Skill,
     Registration,
 )
+from .utils.agent_card_builder import AgentCardBuilder
 
 __version__ = "0.1.0"
 
 __all__ = [
     "AgentCard",
-    "generate_agent_card",
+    "AgentCardBuilder",
     "sign_agent_registration",
     "format_caip10_address",
     "Provider",
