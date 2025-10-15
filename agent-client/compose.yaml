@@ -12,16 +12,23 @@ services:
     env_file:
       - .env
 
+    # Mount ROFL socket for TEE key generation (ROFL MODE - PRODUCTION)
+    # ROFL mode is the default (USE_LOCAL_MODE=false or unset)
+    volumes:
+      - /run/rofl-appd.sock:/run/rofl-appd.sock
+
     # Expose API server port
+    # Maps host port 8000 to container port 80 (default API_PORT in production)
     ports:
-      - "8000:8000"
+      - "8000:80"
 
     # Restart policy for long-running container
     restart: unless-stopped
 
     # Health check configuration (HTTP-based via API server)
+    # Check port 80 (default API_PORT for production container)
     healthcheck:
-      test: ["CMD", "uv", "run", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: ["CMD", "uv", "run", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:80/health')"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -31,6 +31,10 @@ from .address import (
     to_caip10,
     AddressFormatError,
 )
+from .rofl_key_manager import (
+    RoflKeyManager,
+    RoflKeyManagerError,
+)
 
 __all__ = [
     "ABILoadError",
@@ -53,4 +57,6 @@ __all__ = [
     "parse_caip10",
     "to_caip10",
     "AddressFormatError",
+    "RoflKeyManager",
+    "RoflKeyManagerError",
 ]

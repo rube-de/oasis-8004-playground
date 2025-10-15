@@ -1,0 +1,53 @@
+# Docker Compose configuration for LOCAL DEVELOPMENT MODE
+# ⚠️  DEVELOPMENT ONLY - Uses private keys from environment variables
+#
+# Usage:
+#   docker-compose -f docker-compose.local.yml up --build
+#
+# Prerequisites:
+#   - Create .env.local with USE_LOCAL_MODE=true and PRIVATE_KEY
+#   - Never use production keys in local mode
+
+services:
+  agent-server:
+    build:
+      # Build context is parent directory to access contracts
+      context: ..
+      dockerfile: agent-server/Dockerfile
+    platform: linux/amd64
+    image: erc8004-agent-server:local
+    container_name: erc8004-agent-server-local
+
+    # Load environment variables from .env.local file
+    env_file:
+      - .env.local
+
+    environment:
+      # IMPORTANT: Explicitly enable local mode for development
+      # This overrides any value in .env.local if needed
+      - USE_LOCAL_MODE=true
+
+    # Expose API server port (8001 for local development)
+    ports:
+      - "8001:80"
+
+    # Restart policy for local development
+    restart: unless-stopped
+
+    # Health check configuration (HTTP-based via API server)
+    healthcheck:
+      test: ["CMD", "uv", "run", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:80/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Note: No ROFL socket mount needed in local mode
+    # Keys come from PRIVATE_KEY environment variable

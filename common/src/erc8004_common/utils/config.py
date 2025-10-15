@@ -21,11 +21,19 @@ class BaseConfig(BaseSettings):
         - LOG_LEVEL: Logging verbosity (default: INFO)
         - GAS_MULTIPLIER: Gas estimation safety multiplier (default: 1.2)
         - TX_TIMEOUT: Transaction confirmation timeout in seconds (default: 120)
+        - USE_LOCAL_MODE: Use local private key mode for development (default: False = ROFL mode)
+        - ROFL_SOCKET_PATH: Path to ROFL socket for key generation (default: /run/rofl-appd.sock)
+
+    Deployment Modes:
+        - ROFL Mode (default): Keys generated securely in TEE via ROFL client
+        - Local Mode (opt-in): Private keys from environment variables (development only)
 
     Example:
         >>> config = BaseConfig()  # Loads from environment variables
         >>> print(config.rpc_url)
         'http://localhost:8545'
+        >>> print(config.use_local_mode)
+        False  # ROFL mode is default
     """
 
     model_config = SettingsConfigDict(
@@ -75,6 +83,17 @@ class BaseConfig(BaseSettings):
         ge=10,
         le=600,
         description="Transaction confirmation timeout in seconds",
+    )
+
+    # Key management configuration
+    use_local_mode: bool = Field(
+        default=False,
+        description="Use local private key mode (development only). Default: False (ROFL mode)",
+    )
+
+    rofl_socket_path: str = Field(
+        default="/run/rofl-appd.sock",
+        description="Path to ROFL Unix socket for TEE key generation",
     )
 
     @field_validator("identity_registry_address", "reputation_registry_address", "validation_registry_address")

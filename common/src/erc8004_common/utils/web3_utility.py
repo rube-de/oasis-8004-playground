@@ -69,11 +69,16 @@ class Web3Utility:
     def __init__(self, config: Any):
         """Initialize Web3Utility with configuration.
 
+        Supports two deployment modes:
+        - ROFL mode (default): Keys generated in TEE via ROFL client
+        - Local mode (opt-in): Keys from environment variables
+
         Args:
-            config: Configuration object with rpc_url and optional private_key
+            config: Configuration object with rpc_url and mode configuration
 
         Raises:
             ConnectionError: If Web3 connection fails
+            Web3UtilityError: If key acquisition fails
         """
         self.config = config
         self.account: Optional[LocalAccount] = None
@@ -86,17 +91,90 @@ class Web3Utility:
         if not self.w3.is_connected():
             raise ConnectionError(f"Failed to connect to RPC: {config.rpc_url}")
 
-        # Setup signing middleware
-        if hasattr(config, 'private_key') and config.private_key:
-            self._add_signing_middleware()
+        # Setup signing middleware (mode-dependent key source)
+        private_key = self._get_private_key()
+        if private_key:
+            self._add_signing_middleware(private_key)
 
         chain_id = self.w3.eth.chain_id
         logger.info(f"Connected to chain ID: {chain_id}")
 
-    def _add_signing_middleware(self) -> None:
-        """Add transaction signing middleware to Web3 instance."""
+    def _get_private_key(self) -> Optional[str]:
+        """Get private key from appropriate source based on deployment mode.
+
+        Mode detection:
+        - Local mode (use_local_mode=true): Read from env var private_key
+        - ROFL mode (default): Generate/retrieve key from ROFL service
+
+        Returns:
+            Private key as hex string (without 0x prefix), or None if not configured
+
+        Raises:
+            Web3UtilityError: If ROFL key generation fails
+        """
+        # Check if we're in local mode (development)
+        use_local_mode = getattr(self.config, 'use_local_mode', False)
+
+        if use_local_mode:
+            # Local mode: use environment variable private key
+            logger.info("🔓 LOCAL MODE: Using private key from environment")
+
+            if not hasattr(self.config, 'private_key') or not self.config.private_key:
+                logger.warning("Local mode enabled but no private key configured")
+                return None
+
+            return self.config.private_key
+
+        else:
+            # ROFL mode (default): generate/retrieve key from ROFL
+            logger.info("🔒 ROFL MODE: Using TEE key generation")
+
+            from .rofl_key_manager import RoflKeyManager, RoflKeyManagerError
+
+            try:
+                # Use agent_domain as key_id for ROFL key generation
+                if not hasattr(self.config, 'agent_domain'):
+                    raise Web3UtilityError(
+                        "ROFL mode requires agent_domain to be configured. "
+                        "Set AGENT_DOMAIN in environment."
+                    )
+
+                key_id = self.config.agent_domain
+                socket_path = getattr(self.config, 'rofl_socket_path', '/run/rofl-appd.sock')
+
+                logger.info(f"Generating/retrieving ROFL key: key_id={key_id}")
+
+                private_key = RoflKeyManager.generate_or_get_key_sync(
+                    key_id=key_id,
+                    socket_path=socket_path
+                )
+
+                logger.info(f"✓ ROFL key retrieved successfully: key_id={key_id}")
+                return private_key
+
+            except RoflKeyManagerError as e:
+                raise Web3UtilityError(
+                    f"ROFL key generation failed: {e}. "
+                    f"Ensure ROFL service (rofl-appd) is running and socket is accessible."
+                ) from e
+            except Exception as e:
+                raise Web3UtilityError(
+                    f"Unexpected error during ROFL key generation: {e}"
+                ) from e
+
+    def _add_signing_middleware(self, private_key: str) -> None:
+        """Add transaction signing middleware to Web3 instance.
+
+        Works with private keys from any source (ROFL or environment variables).
+
+        Args:
+            private_key: Private key hex string (without 0x prefix)
+
+        Raises:
+            Web3UtilityError: If signing middleware setup fails
+        """
         try:
-            private_key_hex = f"0x{self.config.private_key}"
+            private_key_hex = f"0x{private_key}"
             self.account = Account.from_key(private_key_hex)
 
             logger.info(f"Signing account: {self.account.address}")

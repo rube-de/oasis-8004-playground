@@ -337,13 +337,17 @@ def run_server(
     else:
         logger.warning("API signing disabled - web3_utility not provided")
 
-    uvicorn.run(
-        app,
+    # Run uvicorn in thread-safe mode when called from thread
+    # Use Server class instead of uvicorn.run() for thread safety
+    config = uvicorn.Config(
+        app=app,
         host=host,
         port=port,
         log_level="info",
         access_log=True,
     )
+    server = uvicorn.Server(config)
+    server.run()
 
 
 # For testing/development

@@ -12,72 +12,142 @@ This agent server provides:
 - **Long-Running Operation**: Continuous agent lifecycle with state persistence
 - **Docker-Native**: Built for containerized deployment
 
+## 🔒 Deployment Modes
+
+The agent server supports two deployment modes for key management:
+
+### ROFL Mode (Default, Production) 🔒
+
+**Secure by default.** Keys are generated within a Trusted Execution Environment (TEE) via Oasis ROFL.
+
+**Key Features:**
+- ✅ **TEE Security**: Private keys generated and stored in hardware-isolated TEE
+- ✅ **No Env Var Keys**: No private keys in environment variables or config files
+- ✅ **TEE Attestation**: Cryptographic proof of secure execution
+- ✅ **Key Persistence**: Keys persist across restarts using agent domain as key-id
+- ✅ **Production Ready**: Designed for production deployments
+
+**Requirements:**
+- ROFL service (rofl-appd) running on host
+- ROFL Unix socket accessible at `/run/rofl-appd.sock`
+- `AGENT_DOMAIN` configured (used as ROFL key-id)
+
+**Usage:**
+```bash
+# Copy and configure production environment
+cp .env.example .env
+vim .env  # No PRIVATE_KEY needed!
+
+# Run with production compose (ROFL mode is automatic)
+docker-compose up --build
+```
+
+### Local Mode (Development Only) 🔓
+
+**Explicit opt-in for local development.** Uses private keys from environment variables.
+
+**Key Features:**
+- ⚠️  **Dev Only**: NOT recommended for production
+- ✅ **Simple Setup**: No ROFL infrastructure needed
+- ✅ **Quick Iteration**: Fast local testing with known keys
+- ⚠️  **Less Secure**: Private keys stored as plaintext in environment
+
+**Requirements:**
+- Private key in environment variables
+- `USE_LOCAL_MODE=true` flag set
+
+**Usage:**
+```bash
+# Copy and configure local environment
+cp .env.example.local .env.local
+vim .env.local  # Set USE_LOCAL_MODE=true and PRIVATE_KEY
+
+# Run with local compose file
+docker-compose -f docker-compose.local.yml up --build
+```
+
+### Mode Comparison
+
+| Feature | ROFL Mode (Default) | Local Mode (Opt-in) |
+|---------|---------------------|---------------------|
+| **Security** | 🔒 High (TEE) | ⚠️ Low (env vars) |
+| **Production Ready** | ✅ Yes | ❌ No |
+| **Private Key in Env** | ❌ No | ⚠️ Yes (required) |
+| **TEE Attestation** | ✅ Available | ❌ Not available |
+| **ROFL Service Required** | ✅ Yes | ❌ No |
+| **Setup Complexity** | Medium | Simple |
+| **Key Persistence** | ✅ Automatic | Manual |
+| **Use Case** | Production deployment | Local development |
+
+**Security Recommendation:** Always use ROFL mode for production deployments. Only use local mode for development on trusted local machines.
+
 ## Prerequisites
 
 - Docker and Docker Compose
 - Compiled smart contracts (hardhat artifacts at `../contracts/artifacts/`)
-- Running Ethereum node (default: hardhat local node at http://localhost:8545)
+- Running Ethereum node or RPC endpoint
+- **For ROFL mode (production)**: ROFL service (rofl-appd) running on host
+- **For local mode (development)**: Private key for testing
 
 ## Quick Start
 
-### 1. Configure Environment
+> **Note:** This quick start uses **Local Mode** for simplicity. For production deployments, see [ROFL Mode](#rofl-mode-default-production-) above.
 
-Copy the example environment file and edit with your values:
+### 1. Configure Environment (Local Mode)
+
+Copy the local example environment file:
 
 ```bash
-cp .env.example .env
+cp .env.example.local .env.local
 ```
 
-Edit `.env` with your configuration:
+Edit `.env.local` with your configuration:
 
 ```env
-# Required
+# Required: Enable local development mode
+USE_LOCAL_MODE=true
+
+# Required: Network configuration
 RPC_URL=http://localhost:8545
-PRIVATE_KEY=your_server_private_key_here
 IDENTITY_REGISTRY_ADDRESS=0x5FbDB2315678afecb367f032d93F642f64180aa3
-AGENT_DOMAIN=server.localhost
+AGENT_DOMAIN=localhost
+
+# Required: Development private key (64 hex chars, no 0x)
+PRIVATE_KEY=your_development_private_key_here
 
 # Optional
-LOG_LEVEL=INFO
-GAS_MULTIPLIER=1.2
-TX_TIMEOUT=120
+LOG_LEVEL=DEBUG
 API_PORT=8001
 ```
 
-**Note**: Use a different private key than agent-client to test multiple agents.
+**Security Note**: Never use production keys in local mode!
 
 ### 2. Build Docker Image
 
-From the parent directory:
+Build the Docker image (from agent-server directory):
 
 ```bash
-docker-compose -f agent-server/docker-compose.yml build
-```
-
-Or from this directory:
-
-```bash
-docker-compose build
+docker-compose -f docker-compose.local.yml build
 ```
 
 **Note**: Rebuild when contracts change to update bundled ABIs.
 
-### 3. Run Agent
+### 3. Run Agent (Local Mode)
 
 ```bash
-docker-compose up agent-server
+docker-compose -f docker-compose.local.yml up
 ```
 
 Or run in detached mode:
 
 ```bash
-docker-compose up -d agent-server
+docker-compose -f docker-compose.local.yml up -d
 ```
 
 ### 4. View Logs
 
 ```bash
-docker-compose logs -f agent-server
+docker-compose -f docker-compose.local.yml logs -f agent-server
 ```
 
 ### 5. Stop Agent

@@ -186,13 +186,17 @@ def run_server(host: str = "0.0.0.0", port: int = 80) -> None:
 
     logger.info(f"Starting API server on {host}:{port}")
 
-    uvicorn.run(
-        app,
+    # Run uvicorn in thread-safe mode when called from thread
+    # Use Server class instead of uvicorn.run() for thread safety
+    config = uvicorn.Config(
+        app=app,
         host=host,
         port=port,
         log_level="info",
         access_log=True,
     )
+    server = uvicorn.Server(config)
+    server.run()
 
 
 # For testing/development
