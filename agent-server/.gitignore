@@ -60,3 +60,4 @@ agent-card.json
 # Logs
 *.log
 logs/
+*.orc

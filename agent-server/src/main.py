@@ -151,15 +151,31 @@ def main() -> NoReturn:
         agent.initialize()
         logger.info("Agent initialized successfully")
 
-        # Ensure agent is registered
-        logger.info("Checking registration status...")
-        agent_id = agent.ensure_registered()
+        # Check if domain is set in config
+        if agent.config.agent_domain:
+            logger.info(f"Domain configured: {agent.config.agent_domain}")
 
-        if agent_id:
-            logger.info(f"Agent operational with ID: {agent_id}")
-            display_startup_success(agent)
+            # Legacy behavior: if domain is set, attempt registration
+            # This maintains backward compatibility for existing deployments
+            logger.info("Checking registration status...")
+            try:
+                agent_id = agent.ensure_registered()
+                logger.info(f"Agent operational with ID: {agent_id}")
+                display_startup_success(agent)
+            except AgentError as e:
+                logger.warning(f"Auto-registration failed: {e}")
+                logger.info("Agent will start without registration. Use API endpoints to complete setup:")
+                logger.info("  1. Fund wallet: GET /api/wallet")
+                logger.info("  2. Check status: GET /api/status")
+                logger.info("  3. Register: POST /api/register")
         else:
-            raise AgentError("Registration failed: no agent ID returned")
+            logger.info("No domain configured - starting in unregistered mode")
+            logger.info("Agent will start with lifecycle API endpoints available:")
+            logger.info("  1. Set domain: POST /api/config/domain")
+            logger.info("  2. Get wallet address: GET /api/wallet")
+            logger.info("  3. Fund wallet externally")
+            logger.info("  4. Check status: GET /api/status")
+            logger.info("  5. Register: POST /api/register")
 
         # Run main event loop
         logger.info("Starting main event loop...")

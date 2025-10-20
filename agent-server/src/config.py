@@ -37,7 +37,6 @@ class Config(BaseConfig):
         - GAS_MULTIPLIER: Gas estimation safety multiplier (default: 1.2)
         - TX_TIMEOUT: Transaction confirmation timeout in seconds (default: 120)
         - USE_LOCAL_MODE: Use local private key mode (default: False = ROFL mode)
-        - ROFL_SOCKET_PATH: Path to ROFL socket (default: /run/rofl-appd.sock)
         - REPUTATION_REGISTRY_ADDRESS: Optional ReputationRegistry address
         - VALIDATION_REGISTRY_ADDRESS: Optional ValidationRegistry address
 
@@ -57,9 +56,9 @@ class Config(BaseConfig):
         description="Private key for LOCAL MODE ONLY (without 0x prefix). Not used in ROFL mode.",
     )
 
-    agent_domain: str = Field(
-        ...,
-        description="Domain for agent registration (RFC 8615). Also used as ROFL key-id in production.",
+    agent_domain: str | None = Field(
+        default=None,
+        description="Domain for agent registration (RFC 8615). Can be set via API after initialization.",
     )
 
     # API server configuration (default port 80 for Docker)
@@ -145,25 +144,31 @@ class Config(BaseConfig):
 
     @field_validator("agent_domain")
     @classmethod
-    def validate_agent_domain(cls, v: str) -> str:
+    def validate_agent_domain(cls, v: str | None) -> str | None:
         """Validate agent domain format.
 
         Basic validation for domain format. Should be RFC 8615 compliant.
+        Domain can be None (will be set later via API).
 
         Args:
-            v: Domain string
+            v: Domain string or None
 
         Returns:
-            Validated domain
+            Validated domain or None
 
         Raises:
             ValueError: If domain format is invalid
         """
-        if not v or len(v.strip()) == 0:
-            raise ValueError("Agent domain cannot be empty")
+        # Allow None - domain can be set later via API
+        if v is None:
+            return None
+
+        # If provided, validate format
+        if len(v.strip()) == 0:
+            raise ValueError("Agent domain cannot be empty string (use None if not set)")
 
         # Basic validation: should contain at least one dot or be localhost
-        if "." not in v and v != "localhost":
-            raise ValueError("Agent domain must be a valid domain name or 'localhost'")
+        if "." not in v and v != "localhost" and ":" not in v:
+            raise ValueError("Agent domain must be a valid domain name, 'localhost', or include a port")
 
         return v.lower().strip()

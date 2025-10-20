@@ -211,24 +211,44 @@ def main() -> NoReturn:
         logger.debug(f"Agent Domain: {config.agent_domain}")
         logger.debug(f"Identity Registry: {config.identity_registry_address}")
 
+        # Log ROFL environment details (if running in ROFL mode)
+        if not config.use_local_mode:
+            logger.info(f"🔌 Proxy Host (PROXY_HOST): {config.proxy_host or 'not set'}")
+
         # Initialize agent
         logger.info("Initializing agent...")
         agent = Agent()
         agent.initialize()
         logger.info("Agent initialized successfully")
 
-        # Ensure agent is registered
-        logger.info("Checking registration status...")
-        agent_id = agent.ensure_registered()
+        # Check if domain is set in config
+        if agent.config.agent_domain:
+            logger.info(f"Domain configured: {agent.config.agent_domain}")
 
-        if agent_id:
-            logger.info(f"Agent operational with ID: {agent_id}")
-            display_startup_success(agent)
+            # Legacy behavior: if domain is set, attempt registration
+            # This maintains backward compatibility for existing deployments
+            logger.info("Checking registration status...")
+            try:
+                agent_id = agent.ensure_registered()
+                logger.info(f"Agent operational with ID: {agent_id}")
+                display_startup_success(agent)
+            except AgentError as e:
+                logger.warning(f"Auto-registration failed: {e}")
+                logger.info("Agent will start without registration. Use API endpoints to complete setup:")
+                logger.info("  1. Fund wallet: GET /api/wallet")
+                logger.info("  2. Check status: GET /api/status")
+                logger.info("  3. Register: POST /api/register")
         else:
-            raise AgentError("Registration failed: no agent ID returned")
+            logger.info("No domain configured - starting in unregistered mode")
+            logger.info("Agent will start with lifecycle API endpoints available:")
+            logger.info("  1. Set domain: POST /api/config/domain (optional for client)")
+            logger.info("  2. Get wallet address: GET /api/wallet")
+            logger.info("  3. Fund wallet externally")
+            logger.info("  4. Check status: GET /api/status")
+            logger.info("  5. Register: POST /api/register")
 
         # Optional: Discover agent-server if configured (v1.0)
-        if config.agent_server_id:
+        if config.agent_server_id and agent.agent_id:
             logger.info(f"Agent server ID configured: {config.agent_server_id}, initiating discovery...")
             try:
                 asyncio.run(agent.discover_server_agent(config.agent_server_id))
@@ -241,7 +261,10 @@ def main() -> NoReturn:
                 logger.warning(f"Agent discovery or skill test failed (non-fatal): {e}")
                 logger.info("Continuing with normal operations...")
         else:
-            logger.info("No agent server ID configured (AGENT_SERVER_ID), skipping discovery and skill tests")
+            if config.agent_server_id and not agent.agent_id:
+                logger.info("Agent server ID configured but client not registered yet. Skipping discovery.")
+            else:
+                logger.info("No agent server ID configured (AGENT_SERVER_ID), skipping discovery and skill tests")
 
         # Run main event loop
         logger.info("Starting main event loop...")

@@ -42,7 +42,6 @@ class Config(BaseConfig):
         - GAS_MULTIPLIER: Gas estimation safety multiplier (default: 1.2)
         - TX_TIMEOUT: Transaction confirmation timeout in seconds (default: 120)
         - USE_LOCAL_MODE: Use local private key mode (default: False = ROFL mode)
-        - ROFL_SOCKET_PATH: Path to ROFL socket (default: /run/rofl-appd.sock)
         - REPUTATION_REGISTRY_ADDRESS: Optional ReputationRegistry address
         - VALIDATION_REGISTRY_ADDRESS: Optional ValidationRegistry address
 
@@ -82,9 +81,9 @@ class Config(BaseConfig):
     # Agent domain configuration (OFF-CHAIN ONLY - RFC 8615 / A2A Protocol)
     # NOTE: v1.0 removed on-chain domain storage from IdentityRegistry
     # Domain is now used exclusively for off-chain service discovery and API endpoints
-    agent_domain: str = Field(
-        default="localhost",
-        description="Agent domain for RFC 8615 AgentCard hosting and A2A Protocol URL (NOT stored on-chain)",
+    agent_domain: str | None = Field(
+        default=None,
+        description="Agent domain for RFC 8615 AgentCard hosting and A2A Protocol URL (optional, can be set via API)",
     )
 
     # Optional agent discovery configuration (v1.0)

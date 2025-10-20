@@ -32,10 +32,6 @@ COPY agent-server/src/ /app/src/
 # Copy agent configuration
 COPY agent-server/agent_config.json /app/agent_config.json
 
-# Create non-root user for security
-RUN useradd -m -u 1000 -s /bin/bash agent && \
-    chown -R agent:agent /app
-
 # Switch to non-root user
 USER agent
 
@@ -47,6 +43,7 @@ STOPSIGNAL SIGTERM
 
 # Set Python to run in unbuffered mode for better logging
 ENV PYTHONUNBUFFERED=1
+
 
 # Run application using uv run (activates virtual environment automatically)
 CMD ["uv", "run", "python", "-m", "src.main"]

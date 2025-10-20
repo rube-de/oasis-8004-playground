@@ -17,6 +17,15 @@ import uvicorn
 
 from .skills.price_fetcher import get_price, PriceFetchError, InvalidSymbolError, NetworkError, RateLimitError
 from erc8004_common.utils import Web3Utility
+from erc8004_common.api import lifecycle, config_handlers
+from erc8004_common.api.models import (
+    WalletResponse,
+    StatusResponse,
+    RegisterResponse,
+    ConfigResponse,
+    DomainConfigRequest,
+    DomainConfigResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -99,25 +108,27 @@ class PriceData(BaseModel):
     timestamp: str = Field(..., description="UTC timestamp of the price")
 
 
-def create_app(web3_utility: Optional[Web3Utility] = None) -> FastAPI:
+def create_app(web3_utility: Optional[Web3Utility] = None, agent: Any = None) -> FastAPI:
     """Create and configure FastAPI application.
 
     Args:
         web3_utility: Web3Utility for signing responses (optional for read-only mode)
+        agent: Agent instance for lifecycle management (optional)
 
     Returns:
         Configured FastAPI app instance
     """
     app = FastAPI(
         title="ERC-8004 Agent API",
-        description="A2A Protocol and ERC-8004 compliant agent API server",
+        description="A2A Protocol and ERC-8004 compliant agent API server with lifecycle management",
         version="1.0.0",
         docs_url="/api/docs",
         redoc_url="/api/redoc",
     )
 
-    # Store web3_utility for endpoint access
+    # Store web3_utility and agent for endpoint access
     app.state.web3_utility = web3_utility
+    app.state.agent = agent
 
     # CORS middleware for agent discovery and skills
     app.add_middleware(
@@ -344,6 +355,169 @@ def create_app(web3_utility: Optional[Web3Utility] = None) -> FastAPI:
             logger.error(f"Unexpected error fetching price: {e}")
             raise HTTPException(status_code=500, detail="Internal server error")
 
+    # Lifecycle Management Endpoints
+    @app.get(
+        "/api/wallet",
+        tags=["Lifecycle"],
+        summary="Get wallet information",
+        description="Get agent wallet address, balance, and funding status for ROFL deployment",
+        response_model=WalletResponse,
+    )
+    async def get_wallet() -> WalletResponse:
+        """Get wallet address and balance for funding.
+
+        Returns agent's Ethereum address (derived from ROFL_KEY_ID at startup)
+        along with current balance and funding status. Use this endpoint to get
+        the address for funding before registration.
+
+        Returns:
+            Wallet information including address, balance, and funding status
+
+        Raises:
+            HTTPException: 500 if agent not initialized
+        """
+        if not app.state.agent:
+            raise HTTPException(status_code=500, detail="Agent not initialized")
+
+        try:
+            wallet_info = lifecycle.get_wallet_info(
+                agent=app.state.agent,
+                web3_utility=app.state.agent.web3_utility,
+                config=app.state.agent.config,
+            )
+            return WalletResponse(**wallet_info)
+        except Exception as e:
+            logger.error(f"Failed to get wallet info: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get(
+        "/api/status",
+        tags=["Lifecycle"],
+        summary="Get agent status",
+        description="Get comprehensive agent status including registration, funding, and operational state",
+        response_model=StatusResponse,
+    )
+    async def get_status() -> StatusResponse:
+        """Get agent registration and operational status.
+
+        Returns current state: initialized, ready, registered, or operational.
+        Use this to check prerequisites before registration.
+
+        Returns:
+            Comprehensive status information
+
+        Raises:
+            HTTPException: 500 if agent not initialized
+        """
+        if not app.state.agent:
+            raise HTTPException(status_code=500, detail="Agent not initialized")
+
+        try:
+            status_info = lifecycle.get_status(agent=app.state.agent)
+            return StatusResponse(**status_info)
+        except Exception as e:
+            logger.error(f"Failed to get status: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post(
+        "/api/register",
+        tags=["Lifecycle"],
+        summary="Trigger agent registration",
+        description="Manually trigger on-chain agent registration (requires domain set and wallet funded)",
+        response_model=RegisterResponse,
+    )
+    async def register() -> RegisterResponse:
+        """Trigger agent registration on-chain.
+
+        Prerequisites:
+            - Domain must be set (via POST /api/config/domain)
+            - Wallet must be funded with at least min_balance_for_registration
+
+        Returns:
+            Registration result with agent_id and transaction hash
+
+        Raises:
+            HTTPException: 400 if prerequisites not met, 500 if registration fails
+        """
+        if not app.state.agent:
+            raise HTTPException(status_code=500, detail="Agent not initialized")
+
+        try:
+            result = await lifecycle.register_agent(agent=app.state.agent)
+            return RegisterResponse(**result)
+        except ValueError as e:
+            # Prerequisites not met (domain not set, insufficient balance, etc.)
+            logger.warning(f"Registration prerequisites not met: {e}")
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            logger.error(f"Registration failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # Configuration Management Endpoints
+    @app.get(
+        "/api/config",
+        tags=["Configuration"],
+        summary="Get agent configuration",
+        description="Get current agent configuration including domain, ROFL settings, and registry addresses",
+        response_model=ConfigResponse,
+    )
+    async def get_config() -> ConfigResponse:
+        """Get current agent configuration.
+
+        Returns:
+            Configuration including domain, ROFL settings, chain info, and registries
+
+        Raises:
+            HTTPException: 500 if agent not initialized
+        """
+        if not app.state.agent:
+            raise HTTPException(status_code=500, detail="Agent not initialized")
+
+        try:
+            config_info = config_handlers.get_config(agent=app.state.agent)
+            return ConfigResponse(**config_info)
+        except Exception as e:
+            logger.error(f"Failed to get config: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post(
+        "/api/config/domain",
+        tags=["Configuration"],
+        summary="Set agent domain",
+        description="Set agent domain for registration (does NOT re-derive key, key already exists from startup)",
+        response_model=DomainConfigResponse,
+    )
+    async def set_domain(request: DomainConfigRequest) -> DomainConfigResponse:
+        """Set agent domain for registration.
+
+        Note: This does NOT re-derive the key. The key was already derived at startup
+        using ROFL_KEY_ID. This only sets the domain that will be used for registration.
+
+        Args:
+            request: Domain configuration request
+
+        Returns:
+            Domain update confirmation
+
+        Raises:
+            HTTPException: 400 if domain invalid, 500 if update fails
+        """
+        if not app.state.agent:
+            raise HTTPException(status_code=500, detail="Agent not initialized")
+
+        try:
+            result = await config_handlers.set_domain(
+                agent=app.state.agent,
+                domain=request.domain,
+            )
+            return DomainConfigResponse(**result)
+        except ValueError as e:
+            logger.warning(f"Invalid domain: {e}")
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            logger.error(f"Failed to set domain: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
     @app.get(
         "/",
         tags=["Info"],
@@ -367,6 +541,12 @@ def create_app(web3_utility: Optional[Web3Utility] = None) -> FastAPI:
                 "price_skill": "/api/v1/skills/price",
                 "health": "/health",
                 "docs": "/api/docs",
+                # Lifecycle endpoints
+                "wallet": "/api/wallet",
+                "status": "/api/status",
+                "register": "/api/register",
+                "config": "/api/config",
+                "set_domain": "/api/config/domain",
             },
         }
 
@@ -376,7 +556,8 @@ def create_app(web3_utility: Optional[Web3Utility] = None) -> FastAPI:
 def run_server(
     host: str = "0.0.0.0",
     port: int = 80,
-    web3_utility: Optional[Web3Utility] = None
+    web3_utility: Optional[Web3Utility] = None,
+    agent: Any = None
 ) -> None:
     """Run the FastAPI server with uvicorn.
 
@@ -384,14 +565,20 @@ def run_server(
         host: Host to bind to (default: 0.0.0.0 for container)
         port: Port to bind to (default: 80 for Docker)
         web3_utility: Web3Utility for signing responses (required for skills)
+        agent: Agent instance for lifecycle management (required for lifecycle endpoints)
     """
-    app = create_app(web3_utility)
+    app = create_app(web3_utility, agent)
 
     logger.info(f"Starting API server on {host}:{port}")
     if web3_utility and web3_utility.account:
         logger.info(f"API signing enabled with account: {web3_utility.account.address}")
     else:
         logger.warning("API signing disabled - web3_utility not provided")
+
+    if agent:
+        logger.info("Lifecycle management endpoints enabled")
+    else:
+        logger.warning("Lifecycle endpoints disabled - agent not provided")
 
     # Run uvicorn in thread-safe mode when called from thread
     # Use Server class instead of uvicorn.run() for thread safety

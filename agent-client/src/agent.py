@@ -146,20 +146,128 @@ class Agent:
         except Exception as e:
             raise AgentError(f"Unexpected initialization error: {e}") from e
 
+    def set_domain(self, domain: str) -> None:
+        """Set agent domain for registration.
+
+        Note: This does NOT re-derive the key. The key was already derived at startup
+        using rofl_key_id (ROFL mode) or private_key (local mode). This only sets
+        the domain that will be used for agent registration.
+
+        Args:
+            domain: Domain string to set
+
+        Raises:
+            AgentError: If domain is invalid
+        """
+        if not domain or len(domain.strip()) == 0:
+            raise AgentError("Domain cannot be empty")
+
+        domain = domain.lower().strip()
+
+        # Basic validation
+        if "." not in domain and domain != "localhost" and ":" not in domain:
+            raise AgentError("Invalid domain format")
+
+        logger.info(f"Setting agent domain: {domain}")
+        self.config.agent_domain = domain
+        logger.info(f"✓ Domain set successfully: {domain}")
+
+    @property
+    def has_domain(self) -> bool:
+        """Check if agent domain has been set.
+
+        Returns:
+            True if domain is set, False otherwise
+        """
+        return (
+            self.config is not None
+            and self.config.agent_domain is not None
+            and len(self.config.agent_domain) > 0
+        )
+
+    @property
+    def is_funded(self) -> bool:
+        """Check if agent wallet has sufficient balance for registration.
+
+        Returns:
+            True if wallet is funded above minimum balance, False otherwise
+        """
+        if not self.web3_utility or not self.web3_utility.account or not self.config:
+            return False
+
+        try:
+            balance_wei = self.web3_utility.w3.eth.get_balance(
+                self.web3_utility.account.address
+            )
+            balance_eth = self.web3_utility.w3.from_wei(balance_wei, "ether")
+            min_balance = getattr(self.config, "min_balance_for_registration", 0.001)
+            return float(balance_eth) >= min_balance
+        except Exception:
+            return False
+
+    @property
+    def is_registered(self) -> bool:
+        """Check if agent is registered on-chain.
+
+        Returns:
+            True if agent has an agent_id, False otherwise
+        """
+        return self.agent_id is not None
+
+    @property
+    def status(self) -> str:
+        """Get current agent status.
+
+        Returns:
+            Status string: uninitialized, initialized, ready, registered, operational
+        """
+        if not self.web3_utility or not self.config:
+            return "uninitialized"
+
+        if self.agent_id is not None:
+            if self.running:
+                return "operational"
+            return "registered"
+
+        if self.has_domain and self.is_funded:
+            return "ready"
+
+        return "initialized"
+
     def ensure_registered(self) -> int:
         """Ensure agent is registered with Identity Registry (v1.0).
 
         Checks if agent is already registered (from state or on-chain).
         If not registered, executes registration workflow with optional tokenURI.
 
+        Prerequisites:
+            - Domain must be set (via set_domain or config)
+            - Wallet must be funded
+
         Returns:
             Agent ID (ERC-721 tokenId, either existing or newly assigned)
 
         Raises:
-            AgentError: If registration fails
+            AgentError: If registration fails or prerequisites not met
         """
         if not self.identity_plugin or not self.web3_utility or not self.config:
             raise AgentError("Agent not initialized. Call initialize() first.")
+
+        # Check prerequisites (only if domain is required for this agent type)
+        # Note: agent-client may not need domain for registration, but we check anyway
+        if not self.has_domain:
+            # For client, domain is optional for registration, but log warning
+            logger.warning(
+                "Domain not set. Registration will proceed without domain. "
+                "Use set_domain() or POST /api/config/domain if domain is needed."
+            )
+
+        if not self.is_funded:
+            raise AgentError(
+                f"Insufficient balance for registration. "
+                f"Fund address {self.web3_utility.account.address} with at least "
+                f"{self.config.min_balance_for_registration} ETH."
+            )
 
         # Check if we have persisted agent_id
         if self.agent_id is not None:
@@ -630,12 +738,17 @@ class Agent:
             raise AgentError(f"Failed to generate AgentCard: {e}") from e
 
     def _start_api_server(self) -> None:
-        """Start FastAPI server in background thread for AgentCard hosting.
+        """Start FastAPI server in background thread for AgentCard hosting and lifecycle management.
 
         Starts API server on configured port to serve:
         - /.well-known/agent-card.json (RFC 8615 compliant)
         - /health (health check)
         - /api/v1/agent (agent info)
+        - /api/wallet (wallet info for funding)
+        - /api/status (agent status)
+        - /api/register (manual registration)
+        - /api/config (configuration)
+        - /api/config/domain (set domain)
 
         Raises:
             AgentError: If API server fails to start
@@ -648,10 +761,10 @@ class Agent:
 
             logger.info(f"Starting API server on port {port}")
 
-            # Create thread for API server
+            # Create thread for API server (pass agent for lifecycle management)
             self.api_server_thread = threading.Thread(
                 target=api_server.run_server,
-                args=("0.0.0.0", port),
+                args=("0.0.0.0", port, self),
                 daemon=True,
                 name="api-server"
             )
@@ -666,6 +779,9 @@ class Agent:
             )
             logger.info(
                 f"  Health: http://localhost:{port}/health"
+            )
+            logger.info(
+                f"  Lifecycle: http://localhost:{port}/api/wallet, /api/status, /api/register"
             )
 
         except Exception as e:

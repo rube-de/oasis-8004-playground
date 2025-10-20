@@ -8,9 +8,72 @@ services:
     image: ghcr.io/rube-de/agent-client:latest
     container_name: erc8004-agent-client
 
-    # Load environment variables from .env file
-    env_file:
-      - .env
+    # Environment variables (loaded from .env file or system environment)
+    environment:
+      # ============================================================================
+      # REQUIRED CONFIGURATION
+      # ============================================================================
+
+      # Ethereum RPC endpoint URL
+      RPC_URL: ${RPC_URL:-}
+
+      # Deployed IdentityRegistry contract address (v1.0 - ERC-721 based)
+      # Ethereum Sepolia deployment (deterministic address)
+      IDENTITY_REGISTRY_ADDRESS: ${IDENTITY_REGISTRY_ADDRESS:-0x7177a6867296406881E20d6647232314736Dd09A}
+
+      # Domain for RFC 8615 AgentCard hosting
+      # Used for tokenURI registration
+      AGENT_DOMAIN: ${AGENT_DOMAIN:-}
+
+      # ============================================================================
+      # DEPLOYMENT MODE
+      # ============================================================================
+
+      # ROFL mode is the DEFAULT (USE_LOCAL_MODE is false or unset)
+      # Set to "true" ONLY for local development with PRIVATE_KEY
+      USE_LOCAL_MODE: ${USE_LOCAL_MODE:-false}
+
+      # ============================================================================
+      # ROFL CONFIGURATION
+      # ============================================================================
+
+      # Key ID for ROFL key generation (must be stable across restarts)
+      ROFL_KEY_ID: ${ROFL_KEY_ID:-agent-server-key}
+
+      # HTTP Proxy Host (set automatically by ROFL runtime)
+      PROXY_HOST: ${ROFL_PROXY_HOST:-}
+
+      # ============================================================================
+      # API SERVER CONFIGURATION
+      # ============================================================================
+
+      # Port for AgentCard API server (default: 80 for Docker)
+      API_PORT: ${API_PORT:-8000}
+
+      # ============================================================================
+      # OPERATIONAL SETTINGS
+      # ============================================================================
+
+      # Logging verbosity (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+      # Gas estimation safety multiplier (default: 1.2)
+      GAS_MULTIPLIER: ${GAS_MULTIPLIER:-1.2}
+
+      # Transaction confirmation timeout in seconds (default: 120)
+      TX_TIMEOUT: ${TX_TIMEOUT:-120}
+
+      # ============================================================================
+      # OPTIONAL REGISTRY ADDRESSES (v1.0)
+      # ============================================================================
+
+      # Reputation Registry for cryptographic feedback system
+      # Ethereum Sepolia deployment (deterministic address)
+      REPUTATION_REGISTRY_ADDRESS: ${REPUTATION_REGISTRY_ADDRESS:-0xB5048e3ef1DA4E04deB6f7d0423D06F63869e322}
+
+      # Validation Registry for independent work verification
+      # Ethereum Sepolia deployment (deterministic address)
+      VALIDATION_REGISTRY_ADDRESS: ${VALIDATION_REGISTRY_ADDRESS:-0x662b40A526cb4017d947e71eAF6753BF3eeE66d8}
 
     # Mount ROFL socket for TEE key generation (ROFL MODE - PRODUCTION)
     # ROFL mode is the default (USE_LOCAL_MODE=false or unset)
@@ -20,7 +83,7 @@ services:
     # Expose API server port
     # Maps host port 8000 to container port 80 (default API_PORT in production)
     ports:
-      - "8000:80"
+      - "8000:8000"
 
     # Restart policy for long-running container
     restart: unless-stopped

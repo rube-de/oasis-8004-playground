@@ -96,6 +96,18 @@ class BaseConfig(BaseSettings):
         description="Key ID for ROFL key generation (required in ROFL mode)",
     )
 
+    proxy_host: Optional[str] = Field(
+        default=None,
+        description="HTTP proxy host (mirror of ROFL_PROXY_HOST for verification)",
+    )
+
+    # Funding configuration
+    min_balance_for_registration: float = Field(
+        default=0.001,
+        ge=0.0,
+        description="Minimum wallet balance (in ETH) required for on-chain registration",
+    )
+
     @field_validator("identity_registry_address", "reputation_registry_address", "validation_registry_address")
     @classmethod
     def validate_ethereum_address(cls, v: Optional[str]) -> Optional[str]:
